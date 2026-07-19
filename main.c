@@ -186,6 +186,117 @@ static void execute_sw(CPU *cpu, uint32_t instruction) {
     }
 }
 
+static void execute_lb(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr >= RAM_SIZE) {
+        throw_exception(cpu, "Address out of bounds (LB)");
+        return;
+    }
+    int8_t byte = (int8_t)cpu->ram[addr];
+    uint32_t val = (uint32_t)(int32_t)byte;
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  LB   $%d = mem[0x%08X] (signed)  -> $%d = 0x%08X\n",
+               GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+}
+
+static void execute_lbu(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr >= RAM_SIZE) {
+        throw_exception(cpu, "Address out of bounds (LBU)");
+        return;
+    }
+    uint32_t val = (uint32_t)cpu->ram[addr];
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  LBU  $%d = mem[0x%08X] (unsigned)  -> $%d = 0x%08X\n",
+               GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+}
+
+static void execute_lh(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr % 2 != 0) {
+        throw_exception(cpu, "Unaligned memory access (LH)");
+        return;
+    }
+    if (addr > RAM_SIZE - 2) {
+        throw_exception(cpu, "Address out of bounds (LH)");
+        return;
+    }
+    uint16_t half = (uint16_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
+    uint32_t val = (uint32_t)(int32_t)(int16_t)half; 
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  LH   $%d = mem[0x%08X] (signed)  -> $%d = 0x%08X\n",
+               GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+}
+
+static void execute_lhu(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr % 2 != 0) {
+        throw_exception(cpu, "Unaligned memory access (LHU)");
+        return;
+    }
+    if (addr > RAM_SIZE - 2) {
+        throw_exception(cpu, "Address out of bounds (LHU)");
+        return;
+    }
+    uint32_t val = (uint32_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  LHU  $%d = mem[0x%08X] (unsigned)  -> $%d = 0x%08X\n",
+               GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+}
+
+static void execute_sb(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr >= RAM_SIZE) {
+        throw_exception(cpu, "Address out of bounds (SB)");
+        return;
+    }
+    uint8_t val = (uint8_t)(cpu->regs[GET_RT(instruction)] & 0xFF);
+    cpu->ram[addr] = val;
+    if (trace_enabled) {
+        printf("  SB   mem[0x%08X] = $%d  -> 0x%02X\n",
+               addr, GET_RT(instruction), val);
+    }
+}
+
+static void execute_sh(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr % 2 != 0) {
+        throw_exception(cpu, "Unaligned memory access (SH)");
+        return;
+    }
+    if (addr > RAM_SIZE - 2) {
+        throw_exception(cpu, "Address out of bounds (SH)");
+        return;
+    }
+    uint16_t val = (uint16_t)(cpu->regs[GET_RT(instruction)] & 0xFFFF);
+    cpu->ram[addr]     = val & 0xFF;
+    cpu->ram[addr + 1] = (val >> 8) & 0xFF;
+    if (trace_enabled) {
+        printf("  SH   mem[0x%08X] = $%d  -> 0x%04X\n",
+               addr, GET_RT(instruction), val);
+    }
+}
+
 int main(int argc, char *argv[]) {
     const char *filename = NULL;
 
@@ -239,7 +350,13 @@ int main(int argc, char *argv[]) {
             case 0x08: execute_addi(cpu, instruction); break;
             case 0x09: execute_addiu(cpu, instruction); break;
             case 0x0D: execute_ori(cpu, instruction); break;
+            case 0x20: execute_lb(cpu, instruction); break;
+            case 0x21: execute_lh(cpu, instruction); break;
             case 0x23: execute_lw(cpu, instruction); break;
+            case 0x24: execute_lbu(cpu, instruction); break;
+            case 0x25: execute_lhu(cpu, instruction); break;
+            case 0x28: execute_sb(cpu, instruction); break;
+            case 0x29: execute_sh(cpu, instruction); break;
             case 0x2B: execute_sw(cpu, instruction); break;
             case 0x3F: if (execute_hlt(cpu)) { free(cpu); return 0; } break;
             default:
