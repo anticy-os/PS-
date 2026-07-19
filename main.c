@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
+
+static bool trace_enabled = false;
 
 static void set_reg(CPU *cpu, uint32_t reg, uint32_t val) {
     if (reg != 0) {
@@ -9,8 +12,19 @@ static void set_reg(CPU *cpu, uint32_t reg, uint32_t val) {
     }
 }
 
-static void throw_exception(const char *msg, uint32_t pc) {
-    fprintf(stderr, "Exception at PC 0x%08X: %s\n", pc, msg);
+static void dump_regs(CPU *cpu) {
+    for (int i = 0; i < 32; i++) {
+        printf("$%-2d=0x%08X ", i, cpu->regs[i]);
+        if (i % 4 == 3) printf("\n");
+    }
+}
+
+static void throw_exception(CPU *cpu, const char *msg) {
+    fprintf(stderr, "Exception at PC 0x%08X: %s\n", cpu->pc, msg);
+    if (trace_enabled) {
+        fprintf(stderr, "--- Regs at exception ---\n");
+        dump_regs(cpu);
+    }
     exit(1);
 }
 
@@ -28,18 +42,34 @@ static bool sub_overflow(int32_t a, int32_t b, int32_t *result) {
     return ((ua ^ ub) & (ua ^ ur)) >> 31;
 }
 
+static bool execute_hlt(CPU *cpu){
+    printf("HALT at PC 0x%08X\n", cpu->pc);
+    return true; 
+}
+
 static void execute_add(CPU *cpu, uint32_t instruction) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
     if (add_overflow(rs, rt, &res)) {
-        throw_exception("Integer Overflow (ADD)", cpu->pc);
+        throw_exception(cpu, "Integer Overflow (ADD)");
     }
     set_reg(cpu, GET_RD(instruction), (uint32_t)res);
+    if (trace_enabled) {
+        printf("  ADD  $%d = $%d + $%d  -> $%d = %d (0x%08X)\n",
+               GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
+               GET_RD(instruction), res, (uint32_t)res);
+    }
 }
 
 static void execute_addu(CPU *cpu, uint32_t instruction) {
-    set_reg(cpu, GET_RD(instruction), cpu->regs[GET_RS(instruction)] + cpu->regs[GET_RT(instruction)]);
+    uint32_t res = cpu->regs[GET_RS(instruction)] + cpu->regs[GET_RT(instruction)];
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  ADDU $%d = $%d + $%d  -> $%d = %u (0x%08X)\n",
+               GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
+               GET_RD(instruction), res, res);
+    }
 }
 
 static void execute_addi(CPU *cpu, uint32_t instruction) {
@@ -47,15 +77,26 @@ static void execute_addi(CPU *cpu, uint32_t instruction) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     int32_t res;
     if (add_overflow(rs, imm, &res)) {
-        throw_exception("Integer Overflow (ADDI)", cpu->pc);
+        throw_exception(cpu, "Integer Overflow (ADDI)");
     }
     set_reg(cpu, GET_RT(instruction), (uint32_t)res);
+    if (trace_enabled) {
+        printf("  ADDI $%d = $%d + %d  -> $%d = %d (0x%08X)\n",
+               GET_RT(instruction), GET_RS(instruction), imm,
+               GET_RT(instruction), res, (uint32_t)res);
+    }
 }
 
 static void execute_addiu(CPU *cpu, uint32_t instruction) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
-    set_reg(cpu, GET_RT(instruction), (uint32_t)(rs + imm));
+    uint32_t res = (uint32_t)(rs + imm);
+    set_reg(cpu, GET_RT(instruction), res);
+    if (trace_enabled) {
+        printf("  ADDIU $%d = $%d + %d  -> $%d = %u (0x%08X)\n",
+               GET_RT(instruction), GET_RS(instruction), imm,
+               GET_RT(instruction), res, res);
+    }
 }
 
 static void execute_sub(CPU *cpu, uint32_t instruction) {
@@ -63,32 +104,116 @@ static void execute_sub(CPU *cpu, uint32_t instruction) {
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
     if (sub_overflow(rs, rt, &res)) {
-        throw_exception("Integer Overflow (SUB)", cpu->pc);
+        throw_exception(cpu, "Integer Overflow (SUB)");
     }
     set_reg(cpu, GET_RD(instruction), (uint32_t)res);
+    if (trace_enabled) {
+        printf("  SUB  $%d = $%d - $%d  -> $%d = %d (0x%08X)\n",
+               GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
+               GET_RD(instruction), res, (uint32_t)res);
+    }
 }
 
 static void execute_subu(CPU *cpu, uint32_t instruction) {
-    set_reg(cpu, GET_RD(instruction), cpu->regs[GET_RS(instruction)] - cpu->regs[GET_RT(instruction)]);
+    uint32_t res = cpu->regs[GET_RS(instruction)] - cpu->regs[GET_RT(instruction)];
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  SUBU $%d = $%d - $%d  -> $%d = %u (0x%08X)\n",
+               GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
+               GET_RD(instruction), res, res);
+    }
+}
+
+static void execute_ori(CPU *cpu, uint32_t instruction) {
+    uint32_t imm = instruction & 0xFFFF;
+    uint32_t res = cpu->regs[GET_RS(instruction)] | imm;
+    set_reg(cpu, GET_RT(instruction), res);
+    if (trace_enabled) {
+        printf("  ORI  $%d = $%d | 0x%X  -> $%d = 0x%08X\n",
+               GET_RT(instruction), GET_RS(instruction), imm,
+               GET_RT(instruction), res);
+    }
+}
+
+static void execute_lui(CPU *cpu, uint32_t instruction) {
+    uint32_t imm = instruction & 0xFFFF;
+    uint32_t res = imm << 16;
+    set_reg(cpu, GET_RT(instruction), res);
+    if (trace_enabled) {
+        printf("  LUI  $%d = 0x%04X << 16  -> $%d = 0x%08X\n",
+                GET_RT(instruction), imm,
+                GET_RT(instruction), res);
+    }
+}
+
+static void execute_lw(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr % 4 != 0) {
+        throw_exception(cpu, "Unaligned memory access (LW)");
+        return;
+    }
+    if (addr > RAM_SIZE - 4) {
+        throw_exception(cpu, "Address out of bounds (LW)");
+        return;
+    }
+    uint32_t val = cpu_read32(cpu, addr);
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  LW   $%d = mem[0x%08X]  -> $%d = 0x%08X\n",
+               GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+}
+
+static void execute_sw(CPU *cpu, uint32_t instruction) {
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+    uint32_t addr = rs + (uint32_t)(int32_t)imm;
+    if (addr % 4 != 0) {
+        throw_exception(cpu, "Unaligned memory access (SW)");
+        return;
+    }
+    if (addr > RAM_SIZE - 4) {
+        throw_exception(cpu, "Address out of bounds (SW)");
+        return;
+    }
+    uint32_t val = cpu->regs[GET_RT(instruction)];
+    cpu_write32(cpu, addr, val);
+    if (trace_enabled) {
+        printf("  SW   mem[0x%08X] = $%d  -> 0x%08X\n",
+               addr, GET_RT(instruction), val);
+    }
 }
 
 int main(int argc, char *argv[]) {
-    if(argc < 2) {
-        fprintf(stderr, "Usage: %s <binary_file>\n", argv[0]);
+    const char *filename = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--trace") == 0) {
+            trace_enabled = true;
+        } else {
+            filename = argv[i];
+        }
+    }
+
+    if (!filename) {
+        fprintf(stderr, "Usage: %s [-v|--trace] <binary_file>\n", argv[0]);
         return 1;
     }
+
     CPU *cpu = calloc(1, sizeof(CPU));
     if (!cpu) {
         fprintf(stderr, "Failed to allocate CPU\n");
         return 1;
     }
 
-    if (load_binary(argv[1], cpu, 0) == 0) {
+    if (load_binary(filename, cpu, 0) == 0) {
         free(cpu);
         return 1;
     }
 
-     while (1) {
+    while (1) {
         uint32_t instruction = cpu_read32(cpu, cpu->pc);
         if (instruction == 0x00000000) {
             cpu->pc += 4;
@@ -110,16 +235,31 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
                 break;
+            case 0x0F: execute_lui(cpu, instruction); break;
             case 0x08: execute_addi(cpu, instruction); break;
             case 0x09: execute_addiu(cpu, instruction); break;
+            case 0x0D: execute_ori(cpu, instruction); break;
+            case 0x23: execute_lw(cpu, instruction); break;
+            case 0x2B: execute_sw(cpu, instruction); break;
+            case 0x3F: if (execute_hlt(cpu)) { free(cpu); return 0; } break;
             default:
                 printf("Unknown opcode: 0x%02X at PC 0x%08X\n", GET_OPCODE(instruction), cpu->pc);
                 free(cpu);
                 return 1;
         }
 
+        if (trace_enabled) {
+            dump_regs(cpu);
+            printf("\n");
+        }
+
         cpu->pc += 4;
         if (cpu->pc >= RAM_SIZE) break;
+    }
+
+    if (trace_enabled) {
+        printf("=== Final register state ===\n");
+        dump_regs(cpu);
     }
 
     free(cpu);

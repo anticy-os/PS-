@@ -18,5 +18,6 @@ typedef struct {
 
 uint32_t load_binary(const char *filename, CPU *cpu, uint32_t load_addr);
 uint32_t cpu_read32(CPU *cpu, uint32_t addr);
+void cpu_write32(CPU *cpu, uint32_t addr, uint32_t val);
 
 #endif
