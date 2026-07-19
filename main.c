@@ -297,6 +297,46 @@ static void execute_sh(CPU *cpu, uint32_t instruction) {
     }
 }
 
+static void execute_beq(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    if (rs == rt) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target; 
+        if (trace_enabled) {
+            printf("  BEQ  $%d == $%d, branch taken, next_pc=0x%08X (after delay slot)\n",
+                   GET_RS(instruction), GET_RT(instruction), target);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  BEQ  $%d != $%d, branch not taken\n",
+                   GET_RS(instruction), GET_RT(instruction));
+        }
+    }
+}
+
+static void execute_bne(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    if (rs != rt) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target; 
+        if (trace_enabled) {
+            printf("  BNE  $%d != $%d, branch taken, next_pc=0x%08X (after delay slot)\n",
+                   GET_RS(instruction), GET_RT(instruction), target);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  BNE  $%d == $%d, branch not taken\n",
+                   GET_RS(instruction), GET_RT(instruction));
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     const char *filename = NULL;
 
@@ -319,20 +359,25 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    cpu->pc = 0;
+    cpu->next_pc = 4;
+
     if (load_binary(filename, cpu, 0) == 0) {
         free(cpu);
         return 1;
     }
 
     while (1) {
-        uint32_t instruction = cpu_read32(cpu, cpu->pc);
+        uint32_t current_pc = cpu->pc;
+        uint32_t instruction = cpu_read32(cpu, current_pc);
+        cpu->pc = cpu->next_pc;
+        cpu->next_pc = cpu->pc + 4;
         if (instruction == 0x00000000) {
-            cpu->pc += 4;
             if (cpu->pc >= RAM_SIZE) break;
             continue;
         }
 
-        printf("PC: 0x%08X | Instr: 0x%08X\n", cpu->pc, instruction);
+        printf("PC: 0x%08X | Instr: 0x%08X\n", current_pc, instruction);
         switch (GET_OPCODE(instruction)) {
             case 0x00:
                 switch (GET_FUNCT(instruction)) {
@@ -347,6 +392,8 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case 0x0F: execute_lui(cpu, instruction); break;
+            case 0x04: execute_beq(cpu, instruction, current_pc); break;
+            case 0x05: execute_bne(cpu, instruction, current_pc); break;
             case 0x08: execute_addi(cpu, instruction); break;
             case 0x09: execute_addiu(cpu, instruction); break;
             case 0x0D: execute_ori(cpu, instruction); break;
@@ -370,7 +417,6 @@ int main(int argc, char *argv[]) {
             printf("\n");
         }
 
-        cpu->pc += 4;
         if (cpu->pc >= RAM_SIZE) break;
     }
 

@@ -12,6 +12,7 @@
 
 typedef struct {
     uint32_t pc;
+    uint32_t next_pc;
     uint32_t regs[32];
     uint8_t ram[RAM_SIZE];
 } CPU;
