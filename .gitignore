@@ -3,3 +3,4 @@
 .DS_Store
 mips_emu
 *.o
+mips_emu.dSYM/
