@@ -418,6 +418,42 @@ static void execute_sltiu(CPU *cpu, uint32_t instruction) {
     }
 }
 
+static void execute_sll(CPU *cpu, uint32_t instruction) {
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t shamt = (instruction >> 6) & 0x1F;
+    uint32_t res = rt << shamt;
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = $%d << %u  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
+               GET_RD(instruction), res);
+    }
+}
+
+static void execute_srl(CPU *cpu, uint32_t instruction) {
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t shamt = (instruction >> 6) & 0x1F;
+    uint32_t res = rt >> shamt;
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = $%d >> %u  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
+               GET_RD(instruction), res);
+    }
+}
+
+static void execute_sra(CPU *cpu, uint32_t instruction) {
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t shamt = (instruction >> 6) & 0x1F;
+    int32_t res = (int32_t)rt >> shamt;
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = $%d >> %u  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
+               GET_RD(instruction), res);
+    }
+}
+
 static void execute_beq(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
@@ -502,6 +538,9 @@ int main(int argc, char *argv[]) {
         switch (GET_OPCODE(instruction)) {
             case 0x00:
                 switch (GET_FUNCT(instruction)) {
+                    case 0x00: execute_sll(cpu, instruction); break;
+                    case 0x02: execute_srl(cpu, instruction); break;
+                    case 0x03: execute_sra(cpu, instruction); break;
                     case 0x2A: execute_slt(cpu, instruction); break;
                     case 0x20: execute_add(cpu, instruction); break;
                     case 0x21: execute_addu(cpu, instruction); break;
