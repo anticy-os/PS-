@@ -2,6 +2,7 @@
 #define CPU_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define RAM_SIZE 0x200000 // 2MB
 #define GET_OPCODE(instruction) (((instruction) >> 26) & 0x3F)
@@ -17,8 +18,14 @@ typedef struct {
     uint8_t ram[RAM_SIZE];
 } CPU;
 
+extern bool trace_enabled;
+
 uint32_t load_binary(const char *filename, CPU *cpu, uint32_t load_addr);
 uint32_t cpu_read32(CPU *cpu, uint32_t addr);
+
 void cpu_write32(CPU *cpu, uint32_t addr, uint32_t val);
+void dump_regs(CPU *cpu);
+
+bool cpu_step(CPU *cpu);
 
 #endif
