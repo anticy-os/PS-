@@ -77,16 +77,20 @@ static bool sub_overflow(int32_t a, int32_t b, int32_t *result) {
     return ((ua ^ ub) & (ua ^ ur)) >> 31;
 }
 
+typedef bool (*InstrFn)(CPU *cpu, uint32_t instruction, uint32_t current_pc);
+
 // HLT (I'm not sure yet if this is how it supposed to work)
 
-static bool execute_hlt(CPU *cpu) {
+static bool execute_hlt(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)instruction; (void)current_pc;
     printf("HALT at PC 0x%08X\n", cpu->pc);
-    return true;
+    return false;
 }
 
 // ARITHMETIC
 
-static void execute_add(CPU *cpu, uint32_t instruction) {
+static bool execute_add(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
@@ -99,9 +103,11 @@ static void execute_add(CPU *cpu, uint32_t instruction) {
                GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_addu(CPU *cpu, uint32_t instruction) {
+static bool execute_addu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t res = cpu->regs[GET_RS(instruction)] + cpu->regs[GET_RT(instruction)];
     set_reg(cpu, GET_RD(instruction), res);
     if (trace_enabled) {
@@ -109,9 +115,11 @@ static void execute_addu(CPU *cpu, uint32_t instruction) {
                GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, res);
     }
+    return true;
 }
 
-static void execute_addi(CPU *cpu, uint32_t instruction) {
+static bool execute_addi(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     int32_t res;
@@ -124,9 +132,11 @@ static void execute_addi(CPU *cpu, uint32_t instruction) {
                GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_addiu(CPU *cpu, uint32_t instruction) {
+static bool execute_addiu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t res = (uint32_t)(rs + imm);
@@ -136,9 +146,11 @@ static void execute_addiu(CPU *cpu, uint32_t instruction) {
                GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res, res);
     }
+    return true;
 }
 
-static void execute_sub(CPU *cpu, uint32_t instruction) {
+static bool execute_sub(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
@@ -151,9 +163,11 @@ static void execute_sub(CPU *cpu, uint32_t instruction) {
                GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_subu(CPU *cpu, uint32_t instruction) {
+static bool execute_subu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t res = cpu->regs[GET_RS(instruction)] - cpu->regs[GET_RT(instruction)];
     set_reg(cpu, GET_RD(instruction), res);
     if (trace_enabled) {
@@ -161,11 +175,13 @@ static void execute_subu(CPU *cpu, uint32_t instruction) {
                GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, res);
     }
+    return true;
 }
 
-// LOGIC 
+// LOGIC
 
-static void execute_and(CPU *cpu, uint32_t instruction) {
+static bool execute_and(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t res = rs & rt;
@@ -175,9 +191,11 @@ static void execute_and(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_andi(CPU *cpu, uint32_t instruction) {
+static bool execute_andi(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t imm = instruction & 0xFFFF;
     uint32_t res = rs & imm;
@@ -187,9 +205,11 @@ static void execute_andi(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_or(CPU *cpu, uint32_t instruction) {
+static bool execute_or(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t res = rs | rt;
@@ -199,9 +219,11 @@ static void execute_or(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_ori(CPU *cpu, uint32_t instruction) {
+static bool execute_ori(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t imm = instruction & 0xFFFF;
     uint32_t res = cpu->regs[GET_RS(instruction)] | imm;
     set_reg(cpu, GET_RT(instruction), res);
@@ -210,9 +232,11 @@ static void execute_ori(CPU *cpu, uint32_t instruction) {
                GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res);
     }
+    return true;
 }
 
-static void execute_nor(CPU *cpu, uint32_t instruction) {
+static bool execute_nor(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t res = ~(rs | rt);
@@ -222,9 +246,11 @@ static void execute_nor(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_xor(CPU *cpu, uint32_t instruction) {
+static bool execute_xor(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t res = rs ^ rt;
@@ -234,9 +260,11 @@ static void execute_xor(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_xori(CPU *cpu, uint32_t instruction) {
+static bool execute_xori(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t imm = instruction & 0xFFFF;
     uint32_t res = rs ^ imm;
@@ -246,9 +274,11 @@ static void execute_xori(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_lui(CPU *cpu, uint32_t instruction) {
+static bool execute_lui(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t imm = instruction & 0xFFFF;
     uint32_t res = imm << 16;
     set_reg(cpu, GET_RT(instruction), res);
@@ -257,11 +287,13 @@ static void execute_lui(CPU *cpu, uint32_t instruction) {
                 GET_RT(instruction), imm,
                 GET_RT(instruction), res);
     }
+    return true;
 }
 
-// COMARISON 
+// COMARISON
 
-static void execute_slt(CPU *cpu, uint32_t instruction) {
+static bool execute_slt(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     uint32_t res = (rs < rt) ? 1 : 0;
@@ -271,9 +303,11 @@ static void execute_slt(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_sltu(CPU *cpu, uint32_t instruction) {
+static bool execute_sltu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t res = (rs < rt) ? 1 : 0;
@@ -283,9 +317,11 @@ static void execute_sltu(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_slti(CPU *cpu, uint32_t instruction) {
+static bool execute_slti(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t res = (rs < (int32_t)imm) ? 1 : 0;
@@ -295,9 +331,11 @@ static void execute_slti(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res, (uint32_t)res);
     }
+    return true;
 }
 
-static void execute_sltiu(CPU *cpu, uint32_t instruction) {
+static bool execute_sltiu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm_signed = (int16_t)(instruction & 0xFFFF);
     uint32_t imm = (uint32_t)(int32_t)imm_signed;
@@ -308,11 +346,13 @@ static void execute_sltiu(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RT(instruction), GET_RS(instruction), imm,
                GET_RT(instruction), res);
     }
+    return true;
 }
 
 // SHIFT
 
-static void execute_sll(CPU *cpu, uint32_t instruction) {
+static bool execute_sll(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t shamt = (instruction >> 6) & 0x1F;
     uint32_t res = rt << shamt;
@@ -322,9 +362,11 @@ static void execute_sll(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
                GET_RD(instruction), res);
     }
+    return true;
 }
 
-static void execute_srl(CPU *cpu, uint32_t instruction) {
+static bool execute_srl(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t shamt = (instruction >> 6) & 0x1F;
     uint32_t res = rt >> shamt;
@@ -334,9 +376,11 @@ static void execute_srl(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
                GET_RD(instruction), res);
     }
+    return true;
 }
 
-static void execute_sra(CPU *cpu, uint32_t instruction) {
+static bool execute_sra(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     uint32_t shamt = (instruction >> 6) & 0x1F;
     uint32_t res = (uint32_t)((int32_t)rt >> shamt);
@@ -346,21 +390,23 @@ static void execute_sra(CPU *cpu, uint32_t instruction) {
                __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
                GET_RD(instruction), res);
     }
+    return true;
 }
 
 // MEMORY ACCESS
 
-static void execute_lw(CPU *cpu, uint32_t instruction) {
+static bool execute_lw(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 4 != 0) {
         throw_exception(cpu, "Unaligned memory access (LW)");
-        return;
+        return true;
     }
     if (addr > RAM_SIZE - 4) {
         throw_exception(cpu, "Address out of bounds (LW)");
-        return;
+        return true;
     }
     uint32_t val = cpu_read32(cpu, addr);
     set_reg(cpu, GET_RT(instruction), val);
@@ -368,19 +414,21 @@ static void execute_lw(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  $%d = mem[0x%08X]  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_sw(CPU *cpu, uint32_t instruction) {
+static bool execute_sw(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 4 != 0) {
         throw_exception(cpu, "Unaligned memory access (SW)");
-        return;
+        return true;
     }
     if (addr > RAM_SIZE - 4) {
         throw_exception(cpu, "Address out of bounds (SW)");
-        return;
+        return true;
     }
     uint32_t val = cpu->regs[GET_RT(instruction)];
     cpu_write32(cpu, addr, val);
@@ -388,15 +436,17 @@ static void execute_sw(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  mem[0x%08X] = $%d  -> 0x%08X\n",
                __func__ + 8, addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_lb(CPU *cpu, uint32_t instruction) {
+static bool execute_lb(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr >= RAM_SIZE) {
         throw_exception(cpu, "Address out of bounds (LB)");
-        return;
+        return true;
     }
     int8_t byte = (int8_t)cpu->ram[addr];
     uint32_t val = (uint32_t)(int32_t)byte;
@@ -405,15 +455,17 @@ static void execute_lb(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  $%d = mem[0x%08X] (signed)  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_lbu(CPU *cpu, uint32_t instruction) {
+static bool execute_lbu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr >= RAM_SIZE) {
         throw_exception(cpu, "Address out of bounds (LBU)");
-        return;
+        return true;
     }
     uint32_t val = (uint32_t)cpu->ram[addr];
     set_reg(cpu, GET_RT(instruction), val);
@@ -421,19 +473,21 @@ static void execute_lbu(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  $%d = mem[0x%08X] (unsigned)  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_lh(CPU *cpu, uint32_t instruction) {
+static bool execute_lh(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
         throw_exception(cpu, "Unaligned memory access (LH)");
-        return;
+        return true;
     }
     if (addr > RAM_SIZE - 2) {
         throw_exception(cpu, "Address out of bounds (LH)");
-        return;
+        return true;
     }
     uint16_t half = (uint16_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
     uint32_t val = (uint32_t)(int32_t)(int16_t)half;
@@ -442,19 +496,21 @@ static void execute_lh(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  $%d = mem[0x%08X] (signed)  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_lhu(CPU *cpu, uint32_t instruction) {
+static bool execute_lhu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
         throw_exception(cpu, "Unaligned memory access (LHU)");
-        return;
+        return true;
     }
     if (addr > RAM_SIZE - 2) {
         throw_exception(cpu, "Address out of bounds (LHU)");
-        return;
+        return true;
     }
     uint32_t val = (uint32_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
     set_reg(cpu, GET_RT(instruction), val);
@@ -462,15 +518,17 @@ static void execute_lhu(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  $%d = mem[0x%08X] (unsigned)  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_sb(CPU *cpu, uint32_t instruction) {
+static bool execute_sb(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr >= RAM_SIZE) {
         throw_exception(cpu, "Address out of bounds (SB)");
-        return;
+        return true;
     }
     uint8_t val = (uint8_t)(cpu->regs[GET_RT(instruction)] & 0xFF);
     cpu->ram[addr] = val;
@@ -478,19 +536,21 @@ static void execute_sb(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  mem[0x%08X] = $%d  -> 0x%02X\n",
                __func__ + 8, addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
-static void execute_sh(CPU *cpu, uint32_t instruction) {
+static bool execute_sh(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
         throw_exception(cpu, "Unaligned memory access (SH)");
-        return;
+        return true;
     }
     if (addr > RAM_SIZE - 2) {
         throw_exception(cpu, "Address out of bounds (SH)");
-        return;
+        return true;
     }
     uint16_t val = (uint16_t)(cpu->regs[GET_RT(instruction)] & 0xFFFF);
     cpu->ram[addr]     = val & 0xFF;
@@ -499,11 +559,12 @@ static void execute_sh(CPU *cpu, uint32_t instruction) {
         printf("  [%s]  mem[0x%08X] = $%d  -> 0x%04X\n",
                __func__ + 8, addr, GET_RT(instruction), val);
     }
+    return true;
 }
 
 // BRANCHES
 
-static void execute_beq(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+static bool execute_beq(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
@@ -521,9 +582,10 @@ static void execute_beq(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
                    __func__ + 8, GET_RS(instruction), GET_RT(instruction));
         }
     }
+    return true;
 }
 
-static void execute_bne(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+static bool execute_bne(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
@@ -541,7 +603,48 @@ static void execute_bne(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
                    __func__ + 8, GET_RS(instruction), GET_RT(instruction));
         }
     }
+    return true;
 }
+
+// FUNCTION TABLES
+
+static const InstrFn funct_table[64] = {
+    [0x00] = execute_sll,
+    [0x02] = execute_srl,
+    [0x03] = execute_sra,
+    [0x20] = execute_add,
+    [0x21] = execute_addu,
+    [0x22] = execute_sub,
+    [0x23] = execute_subu,
+    [0x24] = execute_and,
+    [0x25] = execute_or,
+    [0x26] = execute_xor,
+    [0x27] = execute_nor,
+    [0x2A] = execute_slt,
+    [0x2B] = execute_sltu,
+};
+
+static const InstrFn opcode_table[64] = {
+    [0x04] = execute_beq,
+    [0x05] = execute_bne,
+    [0x08] = execute_addi,
+    [0x09] = execute_addiu,
+    [0x0A] = execute_slti,
+    [0x0B] = execute_sltiu,
+    [0x0C] = execute_andi,
+    [0x0D] = execute_ori,
+    [0x0E] = execute_xori,
+    [0x0F] = execute_lui,
+    [0x20] = execute_lb,
+    [0x21] = execute_lh,
+    [0x23] = execute_lw,
+    [0x24] = execute_lbu,
+    [0x25] = execute_lhu,
+    [0x28] = execute_sb,
+    [0x29] = execute_sh,
+    [0x2B] = execute_sw,
+    [0x3F] = execute_hlt,
+};
 
 // MAIN
 
@@ -556,57 +659,32 @@ bool cpu_step(CPU *cpu) {
     }
 
     printf("PC: 0x%08X | Instr: 0x%08X\n", current_pc, instruction);
-    switch (GET_OPCODE(instruction)) {
-        case 0x00:
-            switch (GET_FUNCT(instruction)) {
-                case 0x00: execute_sll(cpu, instruction); break;
-                case 0x02: execute_srl(cpu, instruction); break;
-                case 0x03: execute_sra(cpu, instruction); break;
-                case 0x20: execute_add(cpu, instruction); break;
-                case 0x21: execute_addu(cpu, instruction); break;
-                case 0x22: execute_sub(cpu, instruction); break;
-                case 0x23: execute_subu(cpu, instruction); break;
-                case 0x24: execute_and(cpu, instruction); break;
-                case 0x25: execute_or(cpu, instruction); break;
-                case 0x26: execute_xor(cpu, instruction); break;
-                case 0x27: execute_nor(cpu, instruction); break;
-                case 0x2A: execute_slt(cpu, instruction); break;
-                case 0x2B: execute_sltu(cpu, instruction); break;
-                default:
-                    printf("Unknown funct: 0x%02X at PC 0x%08X\n", GET_FUNCT(instruction), cpu->pc);
-                    return false;
-            }
-            break;
-        case 0x04: execute_beq(cpu, instruction, current_pc); break;
-        case 0x05: execute_bne(cpu, instruction, current_pc); break;
-        case 0x08: execute_addi(cpu, instruction); break;
-        case 0x09: execute_addiu(cpu, instruction); break;
-        case 0x0A: execute_slti(cpu, instruction); break;
-        case 0x0B: execute_sltiu(cpu, instruction); break;
-        case 0x0C: execute_andi(cpu, instruction); break;
-        case 0x0D: execute_ori(cpu, instruction); break;
-        case 0x0E: execute_xori(cpu, instruction); break;
-        case 0x0F: execute_lui(cpu, instruction); break;
-        case 0x20: execute_lb(cpu, instruction); break;
-        case 0x21: execute_lh(cpu, instruction); break;
-        case 0x23: execute_lw(cpu, instruction); break;
-        case 0x24: execute_lbu(cpu, instruction); break;
-        case 0x25: execute_lhu(cpu, instruction); break;
-        case 0x28: execute_sb(cpu, instruction); break;
-        case 0x29: execute_sh(cpu, instruction); break;
-        case 0x2B: execute_sw(cpu, instruction); break;
-        case 0x3F:
-            if (execute_hlt(cpu)) return false;
-            break;
-        default:
-            printf("Unknown opcode: 0x%02X at PC 0x%08X\n", GET_OPCODE(instruction), cpu->pc);
+
+    uint32_t opcode = GET_OPCODE(instruction);
+    InstrFn fn;
+
+    if (opcode == 0x00) {
+        uint32_t funct = GET_FUNCT(instruction);
+        fn = funct_table[funct];
+        if (!fn) {
+            printf("Unknown funct: 0x%02X at PC 0x%08X\n", funct, cpu->pc);
             return false;
+        }
+    } else {
+        fn = opcode_table[opcode];
+        if (!fn) {
+            printf("Unknown opcode: 0x%02X at PC 0x%08X\n", opcode, cpu->pc);
+            return false;
+        }
     }
+
+    bool cont = fn(cpu, instruction, current_pc);
 
     if (trace_enabled) {
         dump_regs(cpu);
         printf("\n");
     }
 
+    if (!cont) return false;
     return cpu->pc < RAM_SIZE;
 }
