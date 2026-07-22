@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 bool trace_enabled = false;
 
@@ -174,6 +175,119 @@ static bool execute_subu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
         printf("  [%s]  $%d = $%d - $%d  -> $%d = %u (0x%08X)\n", __func__ + 8,
                GET_RD(instruction), GET_RS(instruction), GET_RT(instruction),
                GET_RD(instruction), res, res);
+    }
+    return true;
+}
+
+static bool execute_mult(CPU *cpu, uint32_t instruction, uint32_t current_pc){
+    (void) current_pc;
+    int32_t rs = cpu->regs[GET_RS(instruction)];
+    int32_t rt = cpu->regs[GET_RT(instruction)];
+    int64_t res = (int64_t)rs * (int64_t)rt;
+    uint64_t ures = (uint64_t)res; 
+    cpu->hi = (uint32_t)(ures >> 32);
+    cpu->lo = (uint32_t)(ures & 0xFFFFFFFF);
+    if (trace_enabled) {
+        printf("  [%s]  HI:LO = $%d * $%d  -> HI=0x%08X LO=0x%08X\n",
+               __func__ + 8, GET_RS(instruction), GET_RT(instruction), cpu->hi, cpu->lo);
+    }
+    return true;
+}
+
+static bool execute_multu(CPU *cpu, uint32_t instruction, uint32_t current_pc){
+    (void) current_pc;
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint64_t res = (uint64_t)rs * (uint64_t)rt;
+    cpu->hi = (uint32_t)(res >> 32);
+    cpu->lo = (uint32_t)(res & 0xFFFFFFFF);
+    if (trace_enabled) {
+        printf("  [%s]  HI:LO = $%d * $%d  -> HI=0x%08X LO=0x%08X\n",
+               __func__ + 8, GET_RS(instruction), GET_RT(instruction), cpu->hi, cpu->lo);
+    }
+    return true;
+}
+
+static bool execute_div(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    int32_t rs = cpu->regs[GET_RS(instruction)];
+    int32_t rt = cpu->regs[GET_RT(instruction)];
+    if (rt == 0) {
+        if (trace_enabled) printf("  [%s]  division by zero\n", __func__ + 8);
+        return true;
+    }
+    if (rs == INT32_MIN && rt == -1) {
+        cpu->lo = (uint32_t)INT32_MIN;
+        cpu->hi = 0;
+        return true;
+    }
+    cpu->lo = (uint32_t)(rs / rt);
+    cpu->hi = (uint32_t)(rs % rt);
+    if (trace_enabled) {
+        printf("  [%s]  LO = $%d / $%d, HI = $%d %% $%d  -> LO=0x%08X HI=0x%08X\n",
+               __func__ + 8, GET_RS(instruction), GET_RT(instruction),
+               GET_RS(instruction), GET_RT(instruction), cpu->lo, cpu->hi);
+    }
+    return true;
+}
+
+static bool execute_divu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    if (rt == 0) {
+        if (trace_enabled) printf("  [%s]  division by zero\n", __func__ + 8);
+        return true;
+    }
+    cpu->lo = rs / rt;
+    cpu->hi = rs % rt;
+    if (trace_enabled) {
+        printf("  [%s]  LO = $%d / $%d, HI = $%d %% $%d (unsigned)  -> LO=0x%08X HI=0x%08X\n",
+               __func__ + 8, GET_RS(instruction), GET_RT(instruction),
+               GET_RS(instruction), GET_RT(instruction), cpu->lo, cpu->hi);
+    }
+    return true;
+}
+
+static bool execute_mfhi(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    set_reg(cpu, GET_RD(instruction), cpu->hi);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = HI  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RD(instruction), cpu->hi);
+    }
+    return true;
+}
+
+static bool execute_mflo(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    set_reg(cpu, GET_RD(instruction), cpu->lo);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = LO  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RD(instruction), cpu->lo);
+    }
+    return true;
+}
+
+static bool execute_mthi(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    cpu->hi = rs;
+    if (trace_enabled) {
+        printf("  [%s]  HI = $%d  -> HI = 0x%08X\n",
+               __func__ + 8, GET_RS(instruction), cpu->hi);
+    }
+    return true;
+}
+
+
+static bool execute_mtlo(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    cpu->lo = rs;
+    if (trace_enabled) {
+        printf("  [%s]  LO = $%d  -> LO = 0x%08X\n",
+               __func__ + 8, GET_RS(instruction), cpu->lo);
     }
     return true;
 }
@@ -365,6 +479,20 @@ static bool execute_sll(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     return true;
 }
 
+static bool execute_sllv(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    uint32_t shamt = rs & 0x1F;
+    uint32_t res = rt << shamt;
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = $%d << $%d  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RT(instruction), GET_RS(instruction), GET_RD(instruction), res);
+    }
+    return true;
+}
+
 static bool execute_srl(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     (void)current_pc;
     uint32_t rt = cpu->regs[GET_RT(instruction)];
@@ -379,6 +507,20 @@ static bool execute_srl(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     return true;
 }
 
+static bool execute_srlv(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    uint32_t shamt = rs & 0x1F;
+    uint32_t res = rt >> shamt;
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = $%d >> $%d  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RT(instruction), GET_RS(instruction), GET_RD(instruction), res);
+    }
+    return true;
+}
+
 static bool execute_sra(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     (void)current_pc;
     uint32_t rt = cpu->regs[GET_RT(instruction)];
@@ -389,6 +531,20 @@ static bool execute_sra(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
         printf("  [%s]  $%d = $%d >> %u (arithmetic)  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RD(instruction), GET_RT(instruction), shamt,
                GET_RD(instruction), res);
+    }
+    return true;
+}
+
+static bool execute_srav(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    uint32_t shamt = rs & 0x1F;
+    uint32_t res = (uint32_t)((int32_t)rt >> shamt);
+    set_reg(cpu, GET_RD(instruction), res);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = $%d >> $%d (arithmetic)  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RD(instruction), GET_RT(instruction), GET_RS(instruction), GET_RD(instruction), res);
     }
     return true;
 }
@@ -612,6 +768,17 @@ static const InstrFn funct_table[64] = {
     [0x00] = execute_sll,
     [0x02] = execute_srl,
     [0x03] = execute_sra,
+    [0x04] = execute_sllv,
+    [0x06] = execute_srlv,
+    [0x07] = execute_srav,
+    [0x10] = execute_mfhi,
+    [0x11] = execute_mthi,
+    [0x12] = execute_mflo,
+    [0x13] = execute_mtlo,
+    [0x18] = execute_mult,
+    [0x19] = execute_multu,
+    [0x1A] = execute_div,
+    [0x1B] = execute_divu,
     [0x20] = execute_add,
     [0x21] = execute_addu,
     [0x22] = execute_sub,
