@@ -762,6 +762,51 @@ static bool execute_bne(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     return true;
 }
 
+// JUMP
+
+static bool execute_j(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    uint32_t target_index = instruction & 0x03FFFFFF;
+    uint32_t target = ((current_pc + 4) & 0xF0000000) | (target_index << 2);
+    cpu->next_pc = target;
+    if (trace_enabled) {
+        printf("  [%s]  Jump to 0x%08X (after delay slot)\n", __func__ + 8, target);
+    }
+    return true;
+}
+
+static bool execute_jal(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    uint32_t target_index = instruction & 0x03FFFFFF;
+    uint32_t target = ((current_pc + 4) & 0xF0000000) | (target_index << 2);
+set_reg(cpu, 31, current_pc + 8);    cpu->next_pc = target;
+    if (trace_enabled) {
+        printf("  [%s]  Jump and link to 0x%08X, return address stored in $31 (after delay slot)\n",
+               __func__ + 8, target);
+    }
+    return true;
+}
+
+static bool execute_jr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t rs = cpu->regs[GET_RS(instruction)];
+    cpu->next_pc = rs;
+    if (trace_enabled) {
+        printf("  [%s]  Jump register to 0x%08X (after delay slot)\n", __func__ + 8, rs);
+    }
+    return true;
+}
+static bool execute_jalr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    uint32_t target = cpu->regs[GET_RS(instruction)];
+    uint32_t rd = GET_RD(instruction);
+    uint32_t return_addr = current_pc + 8;
+    set_reg(cpu, rd, return_addr);
+    cpu->next_pc = target;
+    if (trace_enabled) {
+        printf("  [%s]  -> 0x%08X, $%d=0x%08X (after delay slot)\n",
+               __func__ + 8, target, rd, return_addr);
+    }
+    return true;
+}
+
 // FUNCTION TABLES
 
 static const InstrFn funct_table[64] = {
@@ -771,6 +816,8 @@ static const InstrFn funct_table[64] = {
     [0x04] = execute_sllv,
     [0x06] = execute_srlv,
     [0x07] = execute_srav,
+    [0x08] = execute_jr,
+    [0x09] = execute_jalr,
     [0x10] = execute_mfhi,
     [0x11] = execute_mthi,
     [0x12] = execute_mflo,
@@ -792,6 +839,8 @@ static const InstrFn funct_table[64] = {
 };
 
 static const InstrFn opcode_table[64] = {
+    [0x02] = execute_j,
+    [0x03] = execute_jal,
     [0x04] = execute_beq,
     [0x05] = execute_bne,
     [0x08] = execute_addi,
