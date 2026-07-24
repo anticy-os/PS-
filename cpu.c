@@ -887,6 +887,64 @@ static bool execute_bgez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     return true;
 }
 
+static bool execute_bltzal(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    set_reg(cpu, 31, current_pc + 8);
+
+    if (rs < 0) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target;
+        if (trace_enabled) {
+            printf("  [%s]  $%d < 0, branch taken, next_pc=0x%08X, $31=0x%08X (after delay slot)\n",
+                   __func__ + 8, GET_RS(instruction), target, current_pc + 8);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  [%s]  $%d >= 0, branch not taken, $31=0x%08X\n",
+                   __func__ + 8, GET_RS(instruction), current_pc + 8);
+        }
+    }
+    return true;
+}
+
+static bool execute_bgezal(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    set_reg(cpu, 31, current_pc + 8);
+
+    if (rs >= 0) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target;
+        if (trace_enabled) {
+            printf("  [%s]  $%d >= 0, branch taken, next_pc=0x%08X, $31=0x%08X (after delay slot)\n",
+                   __func__ + 8, GET_RS(instruction), target, current_pc + 8);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  [%s]  $%d < 0, branch not taken, $31=0x%08X\n",
+                   __func__ + 8, GET_RS(instruction), current_pc + 8);
+        }
+    }
+    return true;
+}
+
+// REGIMM
+
+static bool execute_regimm(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    uint32_t rt = GET_RT(instruction);
+    switch (rt) {
+        case 0x00: return execute_bltz(cpu, instruction, current_pc);
+        case 0x01: return execute_bgez(cpu, instruction, current_pc);
+        case 0x10: return execute_bltzal(cpu, instruction, current_pc);
+        case 0x11: return execute_bgezal(cpu, instruction, current_pc);
+        default:
+            fprintf(stderr, "Unknown REGIMM rt: 0x%02X at PC 0x%08X\n", rt, current_pc);
+            return false;
+    }
+}
 
 
 // FUNCTION TABLES
@@ -921,6 +979,7 @@ static const InstrFn funct_table[64] = {
 };
 
 static const InstrFn opcode_table[64] = {
+    [0x01] = execute_regimm,
     [0x02] = execute_j,
     [0x03] = execute_jal,
     [0x04] = execute_beq,
@@ -968,16 +1027,6 @@ bool cpu_step(CPU *cpu) {
         fn = funct_table[funct];
         if (!fn) {
             printf("Unknown funct: 0x%02X at PC 0x%08X\n", funct, cpu->pc);
-            return false;
-        }
-    } else if (opcode == 0x01) {
-        uint32_t rt = GET_RT(instruction);
-        if (rt == 0x00) {
-            fn = execute_bltz;
-        } else if (rt == 0x01) {
-            fn = execute_bgez;
-        } else {
-            printf("Unknown REGIMM rt: 0x%02X at PC 0x%08X\n", rt, current_pc);
             return false;
         }
     } else {
