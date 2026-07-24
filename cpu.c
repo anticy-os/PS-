@@ -807,6 +807,88 @@ static bool execute_jalr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     return true;
 }
 
+static bool execute_blez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    if (rs <= 0) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target;
+        if (trace_enabled) {
+            printf("  [%s]  $%d <= 0, branch taken, next_pc=0x%08X (after delay slot)\n",
+                   __func__ + 8, GET_RS(instruction), target);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  [%s]  $%d > 0, branch not taken\n",
+                   __func__ + 8, GET_RS(instruction));
+        }
+    }
+    return true;
+}
+
+static bool execute_bltz(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    if (rs < 0) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target;
+        if (trace_enabled) {
+            printf("  [%s]  $%d < 0, branch taken, next_pc=0x%08X (after delay slot)\n",
+                   __func__ + 8, GET_RS(instruction), target);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  [%s]  $%d >= 0, branch not taken\n",
+                   __func__ + 8, GET_RS(instruction));
+        }
+    }
+    return true;
+}
+
+static bool execute_bgtz(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    if (rs > 0) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target;
+        if (trace_enabled) {
+            printf("  [%s]  $%d > 0, branch taken, next_pc=0x%08X (after delay slot)\n",
+                   __func__ + 8, GET_RS(instruction), target);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  [%s]  $%d <= 0, branch not taken\n",
+                   __func__ + 8, GET_RS(instruction));
+        }
+    }
+    return true;
+}
+
+static bool execute_bgez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
+    int16_t imm = (int16_t)(instruction & 0xFFFF);
+
+    if (rs >= 0) {
+        uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
+        cpu->next_pc = target;
+        if (trace_enabled) {
+            printf("  [%s]  $%d >= 0, branch taken, next_pc=0x%08X (after delay slot)\n",
+                   __func__ + 8, GET_RS(instruction), target);
+        }
+    } else {
+        if (trace_enabled) {
+            printf("  [%s]  $%d < 0, branch not taken\n",
+                   __func__ + 8, GET_RS(instruction));
+        }
+    }
+    return true;
+}
+
+
+
 // FUNCTION TABLES
 
 static const InstrFn funct_table[64] = {
@@ -843,6 +925,8 @@ static const InstrFn opcode_table[64] = {
     [0x03] = execute_jal,
     [0x04] = execute_beq,
     [0x05] = execute_bne,
+    [0x06] = execute_blez,
+    [0x07] = execute_bgtz,
     [0x08] = execute_addi,
     [0x09] = execute_addiu,
     [0x0A] = execute_slti,
@@ -884,6 +968,16 @@ bool cpu_step(CPU *cpu) {
         fn = funct_table[funct];
         if (!fn) {
             printf("Unknown funct: 0x%02X at PC 0x%08X\n", funct, cpu->pc);
+            return false;
+        }
+    } else if (opcode == 0x01) {
+        uint32_t rt = GET_RT(instruction);
+        if (rt == 0x00) {
+            fn = execute_bltz;
+        } else if (rt == 0x01) {
+            fn = execute_bgez;
+        } else {
+            printf("Unknown REGIMM rt: 0x%02X at PC 0x%08X\n", rt, current_pc);
             return false;
         }
     } else {
