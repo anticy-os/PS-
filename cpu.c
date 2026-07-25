@@ -40,7 +40,7 @@ uint32_t load_binary(const char *filename, CPU *cpu, uint32_t load_addr) {
     return (uint32_t)bytesRead;
 }
 
-// HELPING SHIT
+// ADDITIONAL FUNCTIONS
 
 static void set_reg(CPU *cpu, uint32_t reg, uint32_t val) {
     if (reg != 0) {
@@ -55,13 +55,27 @@ void dump_regs(CPU *cpu) {
     }
 }
 
-static void throw_exception(CPU *cpu, const char *msg) {
-    fprintf(stderr, "Exception at PC 0x%08X: %s\n", cpu->pc, msg);
+static void throw_exception(CPU *cpu, uint32_t current_pc, uint32_t exc_code) {
+    bool in_delay_slot = cpu->in_delay_slot;
+    uint32_t status = cpu->cop0[12];
+
+    uint32_t ku_ie = status & 0x0F;
+    uint32_t new_ku_ie = (ku_ie << 2) & 0x3F;
+    cpu->cop0[12] = (status & ~0x3Fu) | new_ku_ie;
+
+    cpu->cop0[13] = ((exc_code & 0x1F) << 2) | (in_delay_slot ? (1u << 31) : 0);
+    cpu->cop0[14] = in_delay_slot ? current_pc - 4 : current_pc;
+
+    bool bev = (status >> 22) & 1;
+    uint32_t vector = bev ? 0xBFC00180 : 0x80000080;
+
+    cpu->pc = vector;
+    cpu->next_pc = vector + 4;
+
     if (trace_enabled) {
-        fprintf(stderr, "--- Regs at exception ---\n");
-        dump_regs(cpu);
+        printf("  [EXCEPTION] code=%u EPC=0x%08X -> vector 0x%08X\n",
+               exc_code, cpu->cop0[14], vector);
     }
-    exit(1);
 }
 
 static bool add_overflow(int32_t a, int32_t b, int32_t *result) {
@@ -80,7 +94,7 @@ static bool sub_overflow(int32_t a, int32_t b, int32_t *result) {
 
 typedef bool (*InstrFn)(CPU *cpu, uint32_t instruction, uint32_t current_pc);
 
-// HLT (I'm not sure yet if this is how it supposed to work)
+// HLT (just for testing)
 
 static bool execute_hlt(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     (void)instruction; (void)current_pc;
@@ -96,7 +110,8 @@ static bool execute_add(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
     if (add_overflow(rs, rt, &res)) {
-        throw_exception(cpu, "Integer Overflow (ADD)");
+        throw_exception(cpu, current_pc, EXC_OV);
+        return true;
     }
     set_reg(cpu, GET_RD(instruction), (uint32_t)res);
     if (trace_enabled) {
@@ -125,7 +140,8 @@ static bool execute_addi(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     int32_t res;
     if (add_overflow(rs, imm, &res)) {
-        throw_exception(cpu, "Integer Overflow (ADDI)");
+        throw_exception(cpu, current_pc, EXC_OV);
+        return true;
     }
     set_reg(cpu, GET_RT(instruction), (uint32_t)res);
     if (trace_enabled) {
@@ -156,7 +172,8 @@ static bool execute_sub(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
     if (sub_overflow(rs, rt, &res)) {
-        throw_exception(cpu, "Integer Overflow (SUB)");
+        throw_exception(cpu, current_pc, EXC_OV);
+        return true;
     }
     set_reg(cpu, GET_RD(instruction), (uint32_t)res);
     if (trace_enabled) {
@@ -557,11 +574,11 @@ static bool execute_lw(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 4 != 0) {
-        throw_exception(cpu, "Unaligned memory access (LW)");
+        throw_exception(cpu, current_pc, EXC_ADEL); 
         return true;
     }
     if (addr > RAM_SIZE - 4) {
-        throw_exception(cpu, "Address out of bounds (LW)");
+        throw_exception(cpu, current_pc, EXC_ADEL); 
         return true;
     }
     uint32_t val = cpu_read32(cpu, addr);
@@ -579,11 +596,11 @@ static bool execute_sw(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 4 != 0) {
-        throw_exception(cpu, "Unaligned memory access (SW)");
+        throw_exception(cpu, current_pc, EXC_ADES);
         return true;
     }
     if (addr > RAM_SIZE - 4) {
-        throw_exception(cpu, "Address out of bounds (SW)");
+        throw_exception(cpu, current_pc, EXC_ADES);
         return true;
     }
     uint32_t val = cpu->regs[GET_RT(instruction)];
@@ -601,7 +618,7 @@ static bool execute_lb(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr >= RAM_SIZE) {
-        throw_exception(cpu, "Address out of bounds (LB)");
+        throw_exception(cpu, current_pc, EXC_ADEL);
         return true;
     }
     int8_t byte = (int8_t)cpu->ram[addr];
@@ -620,7 +637,7 @@ static bool execute_lbu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr >= RAM_SIZE) {
-        throw_exception(cpu, "Address out of bounds (LBU)");
+        throw_exception(cpu, current_pc, EXC_ADEL);
         return true;
     }
     uint32_t val = (uint32_t)cpu->ram[addr];
@@ -638,11 +655,11 @@ static bool execute_lh(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
-        throw_exception(cpu, "Unaligned memory access (LH)");
+        throw_exception(cpu, current_pc, EXC_ADEL);
         return true;
     }
     if (addr > RAM_SIZE - 2) {
-        throw_exception(cpu, "Address out of bounds (LH)");
+        throw_exception(cpu, current_pc, EXC_ADEL);
         return true;
     }
     uint16_t half = (uint16_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
@@ -661,11 +678,11 @@ static bool execute_lhu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
-        throw_exception(cpu, "Unaligned memory access (LHU)");
+        throw_exception(cpu, current_pc, EXC_ADEL);
         return true;
     }
     if (addr > RAM_SIZE - 2) {
-        throw_exception(cpu, "Address out of bounds (LHU)");
+        throw_exception(cpu, current_pc, EXC_ADEL);
         return true;
     }
     uint32_t val = (uint32_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
@@ -683,7 +700,7 @@ static bool execute_sb(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr >= RAM_SIZE) {
-        throw_exception(cpu, "Address out of bounds (SB)");
+        throw_exception(cpu, current_pc, EXC_ADES);
         return true;
     }
     uint8_t val = (uint8_t)(cpu->regs[GET_RT(instruction)] & 0xFF);
@@ -701,11 +718,11 @@ static bool execute_sh(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
-        throw_exception(cpu, "Unaligned memory access (SH)");
+        throw_exception(cpu, current_pc, EXC_ADES);
         return true;
     }
     if (addr > RAM_SIZE - 2) {
-        throw_exception(cpu, "Address out of bounds (SH)");
+        throw_exception(cpu, current_pc, EXC_ADES);
         return true;
     }
     uint16_t val = (uint16_t)(cpu->regs[GET_RT(instruction)] & 0xFFFF);
@@ -724,6 +741,7 @@ static bool execute_beq(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     if (rs == rt) {
         uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
@@ -745,6 +763,7 @@ static bool execute_bne(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     if (rs != rt) {
         uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
@@ -768,6 +787,7 @@ static bool execute_j(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t target_index = instruction & 0x03FFFFFF;
     uint32_t target = ((current_pc + 4) & 0xF0000000) | (target_index << 2);
     cpu->next_pc = target;
+    cpu->next_in_delay_slot = true;
     if (trace_enabled) {
         printf("  [%s]  Jump to 0x%08X (after delay slot)\n", __func__ + 8, target);
     }
@@ -777,7 +797,9 @@ static bool execute_j(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 static bool execute_jal(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t target_index = instruction & 0x03FFFFFF;
     uint32_t target = ((current_pc + 4) & 0xF0000000) | (target_index << 2);
-set_reg(cpu, 31, current_pc + 8);    cpu->next_pc = target;
+    set_reg(cpu, 31, current_pc + 8);
+    cpu->next_pc = target;
+    cpu->next_in_delay_slot = true;
     if (trace_enabled) {
         printf("  [%s]  Jump and link to 0x%08X, return address stored in $31 (after delay slot)\n",
                __func__ + 8, target);
@@ -789,6 +811,7 @@ static bool execute_jr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     (void)current_pc;
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     cpu->next_pc = rs;
+    cpu->next_in_delay_slot = true;
     if (trace_enabled) {
         printf("  [%s]  Jump register to 0x%08X (after delay slot)\n", __func__ + 8, rs);
     }
@@ -800,6 +823,7 @@ static bool execute_jalr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t return_addr = current_pc + 8;
     set_reg(cpu, rd, return_addr);
     cpu->next_pc = target;
+    cpu->next_in_delay_slot = true;
     if (trace_enabled) {
         printf("  [%s]  -> 0x%08X, $%d=0x%08X (after delay slot)\n",
                __func__ + 8, target, rd, return_addr);
@@ -810,6 +834,7 @@ static bool execute_jalr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 static bool execute_blez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     if (rs <= 0) {
         uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
@@ -830,6 +855,7 @@ static bool execute_blez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 static bool execute_bltz(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     if (rs < 0) {
         uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
@@ -850,6 +876,7 @@ static bool execute_bltz(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 static bool execute_bgtz(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     if (rs > 0) {
         uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
@@ -870,6 +897,7 @@ static bool execute_bgtz(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 static bool execute_bgez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     if (rs >= 0) {
         uint32_t target = current_pc + 4 + ((uint32_t)(int32_t)imm << 2);
@@ -890,6 +918,7 @@ static bool execute_bgez(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 static bool execute_bltzal(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     set_reg(cpu, 31, current_pc + 8);
 
@@ -912,6 +941,7 @@ static bool execute_bltzal(CPU *cpu, uint32_t instruction, uint32_t current_pc) 
 static bool execute_bgezal(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = (int32_t)cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
+    cpu->next_in_delay_slot = true;
 
     set_reg(cpu, 31, current_pc + 8);
 
@@ -946,6 +976,68 @@ static bool execute_regimm(CPU *cpu, uint32_t instruction, uint32_t current_pc) 
     }
 }
 
+// COP0
+
+static bool execute_cop0(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    uint32_t rs_field = GET_RS(instruction);
+    uint32_t rt = GET_RT(instruction);
+    uint32_t rd = GET_RD(instruction);
+
+    if (rs_field == 0x00) {          // MFC0
+        uint32_t val = cpu->cop0[rd];
+        set_reg(cpu, rt, val);
+        if (trace_enabled) {
+            printf("  [MFC0] $%d = COP0[%d] = 0x%08X\n", rt, rd, val);
+        }
+        return true;
+    }
+
+    if (rs_field == 0x04) {          // MTC0
+        uint32_t val = cpu->regs[rt];
+        cpu->cop0[rd] = val;
+        if (trace_enabled) {
+            printf("  [MTC0] COP0[%d] = $%d = 0x%08X\n", rd, rt, val);
+        }
+        return true;
+    }
+
+    if (rs_field == 0x10 && GET_FUNCT(instruction) == 0x10) {  // RFE
+        uint32_t status = cpu->cop0[12];
+        uint32_t ku_ie_stack = status & 0x3F;
+        uint32_t new_stack = (ku_ie_stack >> 2) | (ku_ie_stack & 0x30);
+        cpu->cop0[12] = (status & ~0x0Fu) | (new_stack & 0x0F);
+        if (trace_enabled) {
+            printf("  [RFE] Status: 0x%08X -> 0x%08X\n", status, cpu->cop0[12]);
+        }
+        return true;
+    }
+
+    (void)current_pc;
+    if (trace_enabled) {
+        printf("  [COP0] unhandled rs=0x%02X\n", rs_field);
+    }
+    return true;
+}
+
+// SYSCALL / BREAK 
+
+static bool execute_syscall(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)instruction;
+    if (trace_enabled) {
+        printf("  [syscall]  software trap\n");
+    }
+    throw_exception(cpu, current_pc, EXC_SYSCALL);
+    return true;
+}
+
+static bool execute_break(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)instruction;
+    if (trace_enabled) {
+        printf("  [break]  breakpoint trap\n");
+    }
+    throw_exception(cpu, current_pc, EXC_BP);
+    return true;
+}
 
 // FUNCTION TABLES
 
@@ -966,6 +1058,8 @@ static const InstrFn funct_table[64] = {
     [0x19] = execute_multu,
     [0x1A] = execute_div,
     [0x1B] = execute_divu,
+    [0x0C] = execute_syscall,
+    [0x0D] = execute_break,
     [0x20] = execute_add,
     [0x21] = execute_addu,
     [0x22] = execute_sub,
@@ -988,6 +1082,7 @@ static const InstrFn opcode_table[64] = {
     [0x07] = execute_bgtz,
     [0x08] = execute_addi,
     [0x09] = execute_addiu,
+    [0x10] = execute_cop0,
     [0x0A] = execute_slti,
     [0x0B] = execute_sltiu,
     [0x0C] = execute_andi,
@@ -1008,16 +1103,17 @@ static const InstrFn opcode_table[64] = {
 // MAIN
 
 bool cpu_step(CPU *cpu) {
+    cpu->in_delay_slot = cpu->next_in_delay_slot;
+    cpu->next_in_delay_slot = false;
+
     uint32_t current_pc = cpu->pc;
     uint32_t instruction = cpu_read32(cpu, current_pc);
     cpu->pc = cpu->next_pc;
     cpu->next_pc = cpu->pc + 4;
 
-    if (instruction == 0x00000000) {
-        return cpu->pc < RAM_SIZE;
+    if (trace_enabled) {
+        printf("PC: 0x%08X | Instr: 0x%08X\n", current_pc, instruction);
     }
-
-    printf("PC: 0x%08X | Instr: 0x%08X\n", current_pc, instruction);
 
     uint32_t opcode = GET_OPCODE(instruction);
     InstrFn fn;
@@ -1026,18 +1122,20 @@ bool cpu_step(CPU *cpu) {
         uint32_t funct = GET_FUNCT(instruction);
         fn = funct_table[funct];
         if (!fn) {
-            printf("Unknown funct: 0x%02X at PC 0x%08X\n", funct, cpu->pc);
-            return false;
+            fprintf(stderr, "Reserved instruction: unknown funct 0x%02X at PC 0x%08X\n", funct, current_pc);
+            throw_exception(cpu, current_pc, EXC_RI);
+            fn = NULL;
         }
     } else {
         fn = opcode_table[opcode];
         if (!fn) {
-            printf("Unknown opcode: 0x%02X at PC 0x%08X\n", opcode, cpu->pc);
-            return false;
+            fprintf(stderr, "Reserved instruction: unknown opcode 0x%02X at PC 0x%08X\n", opcode, current_pc);
+            throw_exception(cpu, current_pc, EXC_RI);
+            fn = NULL;
         }
     }
 
-    bool cont = fn(cpu, instruction, current_pc);
+    bool cont = fn ? fn(cpu, instruction, current_pc) : true;
 
     if (trace_enabled) {
         dump_regs(cpu);

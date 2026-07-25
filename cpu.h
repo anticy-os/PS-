@@ -11,13 +11,25 @@
 #define GET_RD(instruction) (((instruction) >> 11) & 0x1F)
 #define GET_FUNCT(instruction) ((instruction) & 0x3F)
 
+#define EXC_INT      0
+#define EXC_ADEL     4
+#define EXC_ADES     5
+#define EXC_SYSCALL  8
+#define EXC_BP       9
+#define EXC_RI       10
+#define EXC_OV       12
+
 typedef struct {
     uint32_t pc;
     uint32_t next_pc;
     uint32_t regs[32];
     uint32_t hi;
     uint32_t lo;
+    uint32_t cop0[32];
     uint8_t ram[RAM_SIZE];
+
+    bool in_delay_slot;
+    bool next_in_delay_slot;
 } CPU;
 
 extern bool trace_enabled;
