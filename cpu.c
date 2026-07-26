@@ -8,23 +8,77 @@ bool trace_enabled = false;
 
 // MEMORY
 
+uint32_t ps1_translate_address(uint32_t vaddr) {
+    if (vaddr >= 0x80000000 && vaddr <= 0xBFFFFFFF) {
+        return vaddr & 0x1FFFFFFF;
+    }
+    return vaddr;
+}
+
+uint8_t mem_read8(CPU *cpu, uint32_t addr) {
+    uint32_t paddr = ps1_translate_address(addr);
+    if (paddr < RAM_SIZE) return cpu->ram[paddr];
+    if (paddr >= 0x1F800000 && paddr < 0x1F800000 + SCRATCHPAD_SIZE) {
+        return cpu->scratchpad[paddr - 0x1F800000];
+    }
+    if (paddr >= 0x1FC00000 && paddr < 0x1FC00000 + BIOS_SIZE) {
+        return cpu->bios[paddr - 0x1FC00000];
+    }
+    return 0;
+}
+
+uint16_t mem_read16(CPU *cpu, uint32_t addr) {
+    return (uint16_t)mem_read8(cpu, addr) |
+           ((uint16_t)mem_read8(cpu, addr + 1) << 8);
+}
+
+uint32_t mem_read32(CPU *cpu, uint32_t addr) {
+    return (uint32_t)mem_read8(cpu, addr) |
+           ((uint32_t)mem_read8(cpu, addr + 1) << 8) |
+           ((uint32_t)mem_read8(cpu, addr + 2) << 16) |
+           ((uint32_t)mem_read8(cpu, addr + 3) << 24);
+}
+
+void mem_write8(CPU *cpu, uint32_t addr, uint8_t val) {
+    uint32_t paddr = ps1_translate_address(addr);
+    if (paddr < RAM_SIZE) {
+        cpu->ram[paddr] = val;
+    } else if (paddr >= 0x1F800000 && paddr < 0x1F800000 + SCRATCHPAD_SIZE) {
+        cpu->scratchpad[paddr - 0x1F800000] = val;
+    }
+}
+
+void mem_write16(CPU *cpu, uint32_t addr, uint16_t val) {
+    mem_write8(cpu, addr, (uint8_t)val);
+    mem_write8(cpu, addr + 1, (uint8_t)(val >> 8));
+}
+
+void mem_write32(CPU *cpu, uint32_t addr, uint32_t val) {
+    mem_write8(cpu, addr, (uint8_t)val);
+    mem_write8(cpu, addr + 1, (uint8_t)(val >> 8));
+    mem_write8(cpu, addr + 2, (uint8_t)(val >> 16));
+    mem_write8(cpu, addr + 3, (uint8_t)(val >> 24));
+}
+
 uint32_t cpu_read32(CPU *cpu, uint32_t addr) {
-    if (addr > RAM_SIZE - 4) return 0;
-    uint8_t *ptr = &cpu->ram[addr];
-    return (uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24);
+    return mem_read32(cpu, addr);
 }
 
 void cpu_write32(CPU *cpu, uint32_t addr, uint32_t val) {
-    if (addr > RAM_SIZE - 4) return;
-    uint8_t *ptr = &cpu->ram[addr];
-    ptr[0] = val & 0xFF;
-    ptr[1] = (val >> 8) & 0xFF;
-    ptr[2] = (val >> 16) & 0xFF;
-    ptr[3] = (val >> 24) & 0xFF;
+    mem_write32(cpu, addr, val);
 }
 
 uint32_t load_binary(const char *filename, CPU *cpu, uint32_t load_addr) {
-    if (load_addr >= RAM_SIZE) {
+    uint32_t paddr = ps1_translate_address(load_addr);
+    uint8_t *destination;
+    size_t max_len;
+    if (paddr < RAM_SIZE) {
+        destination = &cpu->ram[paddr];
+        max_len = RAM_SIZE - paddr;
+    } else if (paddr >= 0x1FC00000 && paddr < 0x1FC00000 + BIOS_SIZE) {
+        destination = &cpu->bios[paddr - 0x1FC00000];
+        max_len = BIOS_SIZE - (paddr - 0x1FC00000);
+    } else {
         fprintf(stderr, "load_addr out of range\n");
         return 0;
     }
@@ -33,8 +87,7 @@ uint32_t load_binary(const char *filename, CPU *cpu, uint32_t load_addr) {
         perror("Failed to open binary file");
         return 0;
     }
-    size_t max_len = RAM_SIZE - load_addr;
-    size_t bytesRead = fread(&cpu->ram[load_addr], 1, max_len, file);
+    size_t bytesRead = fread(destination, 1, max_len, file);
     printf("Loaded %zu bytes into memory\n", bytesRead);
     fclose(file);
     return (uint32_t)bytesRead;
@@ -55,7 +108,7 @@ void dump_regs(CPU *cpu) {
     }
 }
 
-static void throw_exception(CPU *cpu, uint32_t current_pc, uint32_t exc_code) {
+static void throw_exception(CPU *cpu, uint32_t current_pc, uint32_t exc_code, uint32_t bad_vaddr) {
     bool in_delay_slot = cpu->in_delay_slot;
     uint32_t status = cpu->cop0[12];
 
@@ -63,8 +116,13 @@ static void throw_exception(CPU *cpu, uint32_t current_pc, uint32_t exc_code) {
     uint32_t new_ku_ie = (ku_ie << 2) & 0x3F;
     cpu->cop0[12] = (status & ~0x3Fu) | new_ku_ie;
 
-    cpu->cop0[13] = ((exc_code & 0x1F) << 2) | (in_delay_slot ? (1u << 31) : 0);
+    uint32_t cause = cpu->cop0[13] & ~((0x1Fu << 2) | (1u << 31));
+    cpu->cop0[13] = cause | ((exc_code & 0x1F) << 2) | (in_delay_slot ? (1u << 31) : 0);
     cpu->cop0[14] = in_delay_slot ? current_pc - 4 : current_pc;
+
+    if (exc_code == EXC_ADEL || exc_code == EXC_ADES) {
+        cpu->cop0[8] = bad_vaddr;
+    }
 
     bool bev = (status >> 22) & 1;
     uint32_t vector = bev ? 0xBFC00180 : 0x80000080;
@@ -110,7 +168,7 @@ static bool execute_add(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
     if (add_overflow(rs, rt, &res)) {
-        throw_exception(cpu, current_pc, EXC_OV);
+        throw_exception(cpu, current_pc, EXC_OV, 0);
         return true;
     }
     set_reg(cpu, GET_RD(instruction), (uint32_t)res);
@@ -140,7 +198,7 @@ static bool execute_addi(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     int32_t res;
     if (add_overflow(rs, imm, &res)) {
-        throw_exception(cpu, current_pc, EXC_OV);
+        throw_exception(cpu, current_pc, EXC_OV, 0);
         return true;
     }
     set_reg(cpu, GET_RT(instruction), (uint32_t)res);
@@ -172,7 +230,7 @@ static bool execute_sub(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rt = (int32_t)cpu->regs[GET_RT(instruction)];
     int32_t res;
     if (sub_overflow(rs, rt, &res)) {
-        throw_exception(cpu, current_pc, EXC_OV);
+        throw_exception(cpu, current_pc, EXC_OV, 0);
         return true;
     }
     set_reg(cpu, GET_RD(instruction), (uint32_t)res);
@@ -230,7 +288,12 @@ static bool execute_div(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int32_t rs = cpu->regs[GET_RS(instruction)];
     int32_t rt = cpu->regs[GET_RT(instruction)];
     if (rt == 0) {
-        if (trace_enabled) printf("  [%s]  division by zero\n", __func__ + 8);
+        cpu->lo = (rs >= 0) ? (uint32_t)-1 : 1u;
+        cpu->hi = (uint32_t)rs;
+        if (trace_enabled) {
+            printf("  [%s]  division by zero -> LO=0x%08X HI=0x%08X\n",
+                   __func__ + 8, cpu->lo, cpu->hi);
+        }
         return true;
     }
     if (rs == INT32_MIN && rt == -1) {
@@ -253,7 +316,12 @@ static bool execute_divu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     uint32_t rt = cpu->regs[GET_RT(instruction)];
     if (rt == 0) {
-        if (trace_enabled) printf("  [%s]  division by zero\n", __func__ + 8);
+        cpu->lo = 0xFFFFFFFFu;
+        cpu->hi = rs;
+        if (trace_enabled) {
+            printf("  [%s]  division by zero -> LO=0x%08X HI=0x%08X\n",
+                   __func__ + 8, cpu->lo, cpu->hi);
+        }
         return true;
     }
     cpu->lo = rs / rt;
@@ -421,7 +489,7 @@ static bool execute_lui(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     return true;
 }
 
-// COMARISON
+// COMPARISON
 
 static bool execute_slt(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     (void)current_pc;
@@ -574,17 +642,47 @@ static bool execute_lw(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 4 != 0) {
-        throw_exception(cpu, current_pc, EXC_ADEL); 
+        throw_exception(cpu, current_pc, EXC_ADEL, addr);
         return true;
     }
-    if (addr > RAM_SIZE - 4) {
-        throw_exception(cpu, current_pc, EXC_ADEL); 
-        return true;
-    }
-    uint32_t val = cpu_read32(cpu, addr);
+    uint32_t val = mem_read32(cpu, addr);
     set_reg(cpu, GET_RT(instruction), val);
     if (trace_enabled) {
         printf("  [%s]  $%d = mem[0x%08X]  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+    return true;
+}
+
+static bool execute_lwl(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t addr = cpu->regs[GET_RS(instruction)] +
+                    (uint32_t)(int32_t)(int16_t)(instruction & 0xFFFF);
+    uint32_t offset = addr & 3;
+    uint32_t mem = mem_read32(cpu, addr & ~3u);
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t val = (rt & (0x00FFFFFFu >> (offset * 8))) |
+                   (mem << (24 - offset * 8));
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = mem[0x%08X] (left)  -> $%d = 0x%08X\n",
+               __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
+    }
+    return true;
+}
+
+static bool execute_lwr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t addr = cpu->regs[GET_RS(instruction)] +
+                    (uint32_t)(int32_t)(int16_t)(instruction & 0xFFFF);
+    uint32_t offset = addr & 3;
+    uint32_t mem = mem_read32(cpu, addr & ~3u);
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t val = (rt & (0xFFFFFF00u << ((3 - offset) * 8))) |
+                   (mem >> (offset * 8));
+    set_reg(cpu, GET_RT(instruction), val);
+    if (trace_enabled) {
+        printf("  [%s]  $%d = mem[0x%08X] (right)  -> $%d = 0x%08X\n",
                __func__ + 8, GET_RT(instruction), addr, GET_RT(instruction), val);
     }
     return true;
@@ -596,18 +694,48 @@ static bool execute_sw(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 4 != 0) {
-        throw_exception(cpu, current_pc, EXC_ADES);
-        return true;
-    }
-    if (addr > RAM_SIZE - 4) {
-        throw_exception(cpu, current_pc, EXC_ADES);
+        throw_exception(cpu, current_pc, EXC_ADES, addr);
         return true;
     }
     uint32_t val = cpu->regs[GET_RT(instruction)];
-    cpu_write32(cpu, addr, val);
+    mem_write32(cpu, addr, val);
     if (trace_enabled) {
         printf("  [%s]  mem[0x%08X] = $%d  -> 0x%08X\n",
                __func__ + 8, addr, GET_RT(instruction), val);
+    }
+    return true;
+}
+
+static bool execute_swl(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t addr = cpu->regs[GET_RS(instruction)] +
+                    (uint32_t)(int32_t)(int16_t)(instruction & 0xFFFF);
+    uint32_t offset = addr & 3;
+    uint32_t mem = mem_read32(cpu, addr & ~3u);
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t val = (mem & (0xFFFFFF00u << (offset * 8))) |
+                   (rt >> (24 - offset * 8));
+    mem_write32(cpu, addr & ~3u, val);
+    if (trace_enabled) {
+        printf("  [%s]  mem[0x%08X] (left) = $%d\n",
+               __func__ + 8, addr, GET_RT(instruction));
+    }
+    return true;
+}
+
+static bool execute_swr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
+    (void)current_pc;
+    uint32_t addr = cpu->regs[GET_RS(instruction)] +
+                    (uint32_t)(int32_t)(int16_t)(instruction & 0xFFFF);
+    uint32_t offset = addr & 3;
+    uint32_t mem = mem_read32(cpu, addr & ~3u);
+    uint32_t rt = cpu->regs[GET_RT(instruction)];
+    uint32_t val = (mem & (0x00FFFFFFu >> ((3 - offset) * 8))) |
+                   (rt << (offset * 8));
+    mem_write32(cpu, addr & ~3u, val);
+    if (trace_enabled) {
+        printf("  [%s]  mem[0x%08X] (right) = $%d\n",
+               __func__ + 8, addr, GET_RT(instruction));
     }
     return true;
 }
@@ -617,11 +745,7 @@ static bool execute_lb(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
-    if (addr >= RAM_SIZE) {
-        throw_exception(cpu, current_pc, EXC_ADEL);
-        return true;
-    }
-    int8_t byte = (int8_t)cpu->ram[addr];
+    int8_t byte = (int8_t)mem_read8(cpu, addr);
     uint32_t val = (uint32_t)(int32_t)byte;
     set_reg(cpu, GET_RT(instruction), val);
     if (trace_enabled) {
@@ -636,11 +760,7 @@ static bool execute_lbu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
-    if (addr >= RAM_SIZE) {
-        throw_exception(cpu, current_pc, EXC_ADEL);
-        return true;
-    }
-    uint32_t val = (uint32_t)cpu->ram[addr];
+    uint32_t val = (uint32_t)mem_read8(cpu, addr);
     set_reg(cpu, GET_RT(instruction), val);
     if (trace_enabled) {
         printf("  [%s]  $%d = mem[0x%08X] (unsigned)  -> $%d = 0x%08X\n",
@@ -655,14 +775,10 @@ static bool execute_lh(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
-        throw_exception(cpu, current_pc, EXC_ADEL);
+        throw_exception(cpu, current_pc, EXC_ADEL, addr);
         return true;
     }
-    if (addr > RAM_SIZE - 2) {
-        throw_exception(cpu, current_pc, EXC_ADEL);
-        return true;
-    }
-    uint16_t half = (uint16_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
+    uint16_t half = mem_read16(cpu, addr);
     uint32_t val = (uint32_t)(int32_t)(int16_t)half;
     set_reg(cpu, GET_RT(instruction), val);
     if (trace_enabled) {
@@ -678,14 +794,10 @@ static bool execute_lhu(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
-        throw_exception(cpu, current_pc, EXC_ADEL);
+        throw_exception(cpu, current_pc, EXC_ADEL, addr);
         return true;
     }
-    if (addr > RAM_SIZE - 2) {
-        throw_exception(cpu, current_pc, EXC_ADEL);
-        return true;
-    }
-    uint32_t val = (uint32_t)(cpu->ram[addr] | (cpu->ram[addr + 1] << 8));
+    uint32_t val = (uint32_t)mem_read16(cpu, addr);
     set_reg(cpu, GET_RT(instruction), val);
     if (trace_enabled) {
         printf("  [%s]  $%d = mem[0x%08X] (unsigned)  -> $%d = 0x%08X\n",
@@ -699,12 +811,8 @@ static bool execute_sb(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     uint32_t rs = cpu->regs[GET_RS(instruction)];
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
-    if (addr >= RAM_SIZE) {
-        throw_exception(cpu, current_pc, EXC_ADES);
-        return true;
-    }
     uint8_t val = (uint8_t)(cpu->regs[GET_RT(instruction)] & 0xFF);
-    cpu->ram[addr] = val;
+    mem_write8(cpu, addr, val);
     if (trace_enabled) {
         printf("  [%s]  mem[0x%08X] = $%d  -> 0x%02X\n",
                __func__ + 8, addr, GET_RT(instruction), val);
@@ -718,16 +826,11 @@ static bool execute_sh(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     int16_t imm = (int16_t)(instruction & 0xFFFF);
     uint32_t addr = rs + (uint32_t)(int32_t)imm;
     if (addr % 2 != 0) {
-        throw_exception(cpu, current_pc, EXC_ADES);
-        return true;
-    }
-    if (addr > RAM_SIZE - 2) {
-        throw_exception(cpu, current_pc, EXC_ADES);
+        throw_exception(cpu, current_pc, EXC_ADES, addr);
         return true;
     }
     uint16_t val = (uint16_t)(cpu->regs[GET_RT(instruction)] & 0xFFFF);
-    cpu->ram[addr]     = val & 0xFF;
-    cpu->ram[addr + 1] = (val >> 8) & 0xFF;
+    mem_write16(cpu, addr, val);
     if (trace_enabled) {
         printf("  [%s]  mem[0x%08X] = $%d  -> 0x%04X\n",
                __func__ + 8, addr, GET_RT(instruction), val);
@@ -971,8 +1074,9 @@ static bool execute_regimm(CPU *cpu, uint32_t instruction, uint32_t current_pc) 
         case 0x10: return execute_bltzal(cpu, instruction, current_pc);
         case 0x11: return execute_bgezal(cpu, instruction, current_pc);
         default:
-            fprintf(stderr, "Unknown REGIMM rt: 0x%02X at PC 0x%08X\n", rt, current_pc);
-            return false;
+            fprintf(stderr, "Reserved instruction: unknown REGIMM rt 0x%02X at PC 0x%08X\n", rt, current_pc);
+            throw_exception(cpu, current_pc, EXC_RI, 0);
+            return true;
     }
 }
 
@@ -1026,7 +1130,7 @@ static bool execute_syscall(CPU *cpu, uint32_t instruction, uint32_t current_pc)
     if (trace_enabled) {
         printf("  [syscall]  software trap\n");
     }
-    throw_exception(cpu, current_pc, EXC_SYSCALL);
+    throw_exception(cpu, current_pc, EXC_SYSCALL, 0);
     return true;
 }
 
@@ -1035,7 +1139,7 @@ static bool execute_break(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     if (trace_enabled) {
         printf("  [break]  breakpoint trap\n");
     }
-    throw_exception(cpu, current_pc, EXC_BP);
+    throw_exception(cpu, current_pc, EXC_BP, 0);
     return true;
 }
 
@@ -1091,12 +1195,16 @@ static const InstrFn opcode_table[64] = {
     [0x0F] = execute_lui,
     [0x20] = execute_lb,
     [0x21] = execute_lh,
+    [0x22] = execute_lwl,
     [0x23] = execute_lw,
     [0x24] = execute_lbu,
     [0x25] = execute_lhu,
+    [0x26] = execute_lwr,
     [0x28] = execute_sb,
     [0x29] = execute_sh,
+    [0x2A] = execute_swl,
     [0x2B] = execute_sw,
+    [0x2E] = execute_swr,
     [0x3F] = execute_hlt,
 };
 
@@ -1123,14 +1231,14 @@ bool cpu_step(CPU *cpu) {
         fn = funct_table[funct];
         if (!fn) {
             fprintf(stderr, "Reserved instruction: unknown funct 0x%02X at PC 0x%08X\n", funct, current_pc);
-            throw_exception(cpu, current_pc, EXC_RI);
+            throw_exception(cpu, current_pc, EXC_RI, 0);
             fn = NULL;
         }
     } else {
         fn = opcode_table[opcode];
         if (!fn) {
             fprintf(stderr, "Reserved instruction: unknown opcode 0x%02X at PC 0x%08X\n", opcode, current_pc);
-            throw_exception(cpu, current_pc, EXC_RI);
+            throw_exception(cpu, current_pc, EXC_RI, 0);
             fn = NULL;
         }
     }
@@ -1143,5 +1251,5 @@ bool cpu_step(CPU *cpu) {
     }
 
     if (!cont) return false;
-    return cpu->pc < RAM_SIZE;
+    return true;
 }

@@ -25,10 +25,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    cpu->pc = 0;
-    cpu->next_pc = 4;
+    cpu->pc = 0xBFC00000;
+    cpu->next_pc = 0xBFC00004;
+    cpu->cop0[12] = 0x00400000;
+    cpu->cop0[15] = 0x00000002;
 
-    if (load_binary(filename, cpu, 0) == 0) {
+    if (load_binary(filename, cpu, 0x1FC00000) == 0) {
         free(cpu);
         return 1;
     }
