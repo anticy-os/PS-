@@ -33,6 +33,9 @@ uint16_t mem_read16(CPU *cpu, uint32_t addr) {
 }
 
 uint32_t mem_read32(CPU *cpu, uint32_t addr) {
+    uint32_t paddr = ps1_translate_address(addr);
+    if (paddr == 0x1F801810) return gpu_read_data(&cpu->gpu);
+    if (paddr == 0x1F801814) return gpu_read_status(&cpu->gpu);
     return (uint32_t)mem_read8(cpu, addr) |
            ((uint32_t)mem_read8(cpu, addr + 1) << 8) |
            ((uint32_t)mem_read8(cpu, addr + 2) << 16) |
@@ -42,6 +45,9 @@ uint32_t mem_read32(CPU *cpu, uint32_t addr) {
 void mem_write8(CPU *cpu, uint32_t addr, uint8_t val) {
     uint32_t paddr = ps1_translate_address(addr);
     if (paddr < RAM_SIZE) {
+        if (cpu->cop0[12] & (1u << 16)) {
+            return;
+        }
         cpu->ram[paddr] = val;
     } else if (paddr >= 0x1F800000 && paddr < 0x1F800000 + SCRATCHPAD_SIZE) {
         cpu->scratchpad[paddr - 0x1F800000] = val;
@@ -54,6 +60,9 @@ void mem_write16(CPU *cpu, uint32_t addr, uint16_t val) {
 }
 
 void mem_write32(CPU *cpu, uint32_t addr, uint32_t val) {
+    uint32_t paddr = ps1_translate_address(addr);
+    if (paddr == 0x1F801810) { gpu_write_gp0(&cpu->gpu, val); return; }
+    if (paddr == 0x1F801814) { gpu_write_gp1(&cpu->gpu, val); return; }
     mem_write8(cpu, addr, (uint8_t)val);
     mem_write8(cpu, addr + 1, (uint8_t)(val >> 8));
     mem_write8(cpu, addr + 2, (uint8_t)(val >> 16));
@@ -1243,13 +1252,9 @@ bool cpu_step(CPU *cpu) {
         }
     }
 
-    bool cont = fn ? fn(cpu, instruction, current_pc) : true;
-
     if (trace_enabled) {
-        dump_regs(cpu);
-        printf("\n");
+            dump_regs(cpu);
+            printf("\n");
     }
-
-    if (!cont) return false;
     return true;
 }

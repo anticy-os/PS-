@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "gpu.h"
 
 #define RAM_SIZE 0x200000 // 2MB
 #define BIOS_SIZE (512 * 1024)
@@ -34,6 +35,8 @@ typedef struct {
 
     bool in_delay_slot;
     bool next_in_delay_slot;
+
+    GPU gpu;
 } CPU;
 
 extern bool trace_enabled;
