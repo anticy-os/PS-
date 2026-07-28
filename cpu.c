@@ -1233,7 +1233,7 @@ bool cpu_step(CPU *cpu) {
     }
 
     uint32_t opcode = GET_OPCODE(instruction);
-    InstrFn fn;
+    InstrFn fn = NULL;
 
     if (opcode == 0x00) {
         uint32_t funct = GET_FUNCT(instruction);
@@ -1241,20 +1241,22 @@ bool cpu_step(CPU *cpu) {
         if (!fn) {
             fprintf(stderr, "Reserved instruction: unknown funct 0x%02X at PC 0x%08X\n", funct, current_pc);
             throw_exception(cpu, current_pc, EXC_RI, 0);
-            fn = NULL;
         }
     } else {
         fn = opcode_table[opcode];
         if (!fn) {
             fprintf(stderr, "Reserved instruction: unknown opcode 0x%02X at PC 0x%08X\n", opcode, current_pc);
             throw_exception(cpu, current_pc, EXC_RI, 0);
-            fn = NULL;
         }
     }
 
+    if (fn) {
+        fn(cpu, instruction, current_pc);
+    }
+
     if (trace_enabled) {
-            dump_regs(cpu);
-            printf("\n");
+        dump_regs(cpu);
+        printf("\n");
     }
     return true;
 }
