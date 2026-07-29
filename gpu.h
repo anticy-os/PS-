@@ -22,6 +22,10 @@ typedef struct {
     uint16_t transfer_row, transfer_col;
 
     bool display_enabled;
+    uint16_t display_x, display_y;
+    uint16_t display_h_start, display_h_end;
+    uint16_t display_v_start, display_v_end;
+    uint8_t  display_mode;
 } GPU;
 
 void gpu_init(GPU *gpu);

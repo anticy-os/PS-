@@ -1,6 +1,6 @@
 *.py
 /tests/
 .DS_Store
-mips_emu
+ps1emu
 *.o
-mips_emu.dSYM/
+ps1emu.dSYM/

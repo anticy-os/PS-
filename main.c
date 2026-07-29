@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "video.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +16,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (!filename) {
-        fprintf(stderr, "Usage: %s [-v|--trace] <binary_file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-v|--trace] <bios_file>\n", argv[0]);
         return 1;
     }
 
@@ -29,13 +30,26 @@ int main(int argc, char *argv[]) {
     cpu->next_pc = 0xBFC00004;
     cpu->cop0[12] = 0x00400000;
     cpu->cop0[15] = 0x00000002;
+    gpu_init(&cpu->gpu);
 
     if (load_binary(filename, cpu, 0x1FC00000) == 0) {
         free(cpu);
         return 1;
     }
 
-    while (cpu_step(cpu)) {
+    Video video;
+    if (!video_init(&video)) {
+        free(cpu);
+        return 1;
+    }
+
+    bool running = true;
+    unsigned instructions_since_present = 0;
+    while (running && cpu_step(cpu)) {
+        if (++instructions_since_present == 2048) {
+            running = video_update(&video, &cpu->gpu);
+            instructions_since_present = 0;
+        }
     }
 
     if (trace_enabled) {
@@ -43,6 +57,7 @@ int main(int argc, char *argv[]) {
         dump_regs(cpu);
     }
 
+    video_destroy(&video);
     free(cpu);
     return 0;
 }

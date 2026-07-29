@@ -1,6 +1,4 @@
 
-// TEMPORARY STUB, NOT TESTED YET
-
 #include "gpu.h"
 #include <string.h>
 #include <stdio.h>
@@ -11,6 +9,10 @@ extern bool trace_enabled;
 void gpu_init(GPU *gpu){
     memset(gpu, 0, sizeof(GPU));
     gpu->gpustat = 0x1C000000;
+    gpu->display_h_start = 0x260;
+    gpu->display_h_end = 0xC60;
+    gpu->display_v_start = 0x10;
+    gpu->display_v_end = 0x100;
 }
 
 static void gpu_fill_rect(GPU *gpu, uint32_t color_word, uint32_t pos, uint32_t size){
@@ -143,6 +145,21 @@ void gpu_write_gp1(GPU *gpu, uint32_t value) {
             if (trace_enabled) {
                 printf("  [GPU] Display %s\n", gpu->display_enabled ? "enabled" : "disabled");
             }
+            break;
+        case 0x05: // DISPLAY VRAM START
+            gpu->display_x = value & 0x3FF;
+            gpu->display_y = (value >> 10) & 0x1FF;
+            break;
+        case 0x06: // HORIZONTAL DISPLAY RANGE
+            gpu->display_h_start = value & 0xFFF;
+            gpu->display_h_end = (value >> 12) & 0xFFF;
+            break;
+        case 0x07: // VERTICAL DISPLAY RANGE
+            gpu->display_v_start = value & 0x3FF;
+            gpu->display_v_end = (value >> 10) & 0x3FF;
+            break;
+        case 0x08: // DISPLAY MODE
+            gpu->display_mode = value & 0x7F;
             break;
         default:
             if (trace_enabled) {
