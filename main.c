@@ -1,5 +1,6 @@
 #include "cpu.h"
 #include "video.h"
+#include "irq.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,7 @@ int main(int argc, char *argv[]) {
     while (running && cpu_step(cpu)) {
         if (++instructions_since_present == 2048) {
             running = video_update(&video, &cpu->gpu);
+            irq_request(&cpu->irq, I_VBLANK);
             instructions_since_present = 0;
         }
     }

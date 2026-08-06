@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "bios_calls.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,8 @@ uint32_t mem_read32(CPU *cpu, uint32_t addr) {
     uint32_t paddr = ps1_translate_address(addr);
     if (paddr == 0x1F801810) return gpu_read_data(&cpu->gpu);
     if (paddr == 0x1F801814) return gpu_read_status(&cpu->gpu);
+    if (paddr == 0x1F801070) return irq_read_status(&cpu->irq);
+    if (paddr == 0x1F801074) return irq_read_mask(&cpu->irq);
 
     uint32_t dma_val;
     if (dma_mem_read32(cpu, paddr, &dma_val)) return dma_val;
@@ -67,6 +70,8 @@ void mem_write32(CPU *cpu, uint32_t addr, uint32_t val) {
     uint32_t paddr = ps1_translate_address(addr);
     if (paddr == 0x1F801810) { gpu_write_gp0(&cpu->gpu, val); return; }
     if (paddr == 0x1F801814) { gpu_write_gp1(&cpu->gpu, val); return; }
+    if (paddr == 0x1F801070) { cpu->irq.i_stat &= ~val; return; }
+    if (paddr == 0x1F801074) { cpu->irq.i_mask = val; return; }
 
     if (dma_mem_write32(cpu, paddr, val)) return; 
 
@@ -932,7 +937,14 @@ static bool execute_jr(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
     cpu->next_pc = rs;
     cpu->next_in_delay_slot = true;
     if (trace_enabled) {
-        printf("  [%s]  Jump register to 0x%08X (after delay slot)\n", __func__ + 8, rs);
+        if (rs == 0xA0 || rs == 0xB0 || rs == 0xC0) {
+            uint32_t func_num = cpu->regs[9]; // $t1 holds the function number by convention
+            const char *name = bios_call_name(rs, func_num);
+            printf("  [%s]  BIOS CALL %02X(%02Xh) = %s\n", __func__ + 8, rs, func_num,
+                   name ? name : "???");
+        } else {
+            printf("  [%s]  Jump register to 0x%08X (after delay slot)\n", __func__ + 8, rs);
+        }
     }
     return true;
 }
@@ -1123,9 +1135,8 @@ static bool execute_cop0(CPU *cpu, uint32_t instruction, uint32_t current_pc) {
 
     if (rs_field == 0x10 && GET_FUNCT(instruction) == 0x10) {  // RFE
         uint32_t status = cpu->cop0[12];
-        uint32_t ku_ie_stack = status & 0x3F;
-        uint32_t new_stack = (ku_ie_stack >> 2) | (ku_ie_stack & 0x30);
-        cpu->cop0[12] = (status & ~0x0Fu) | (new_stack & 0x0F);
+        uint32_t mode_stack = status & 0x3F;
+        cpu->cop0[12] = (status & ~0x0Fu) | (mode_stack >> 2);
         if (trace_enabled) {
             printf("  [RFE] Status: 0x%08X -> 0x%08X\n", status, cpu->cop0[12]);
         }
@@ -1224,11 +1235,31 @@ static const InstrFn opcode_table[64] = {
     [0x3F] = execute_hlt,
 };
 
+// INTERRUPTS
+
+bool check_interrupts(CPU *cpu) {
+    uint32_t status = cpu->cop0[12];
+    bool iec = (status & 0x01) != 0; 
+    
+    if (iec && ((cpu->irq.i_stat & cpu->irq.i_mask) != 0)) {
+        cpu->cop0[13] |= (1u << 10);
+        throw_exception(cpu, cpu->pc, EXC_INT, 0);
+        return true;
+    } else {
+        cpu->cop0[13] &= ~(1u << 10);
+    }
+    return false;
+}
+
 // MAIN
 
 bool cpu_step(CPU *cpu) {
     cpu->in_delay_slot = cpu->next_in_delay_slot;
     cpu->next_in_delay_slot = false;
+
+    if (check_interrupts(cpu)) {
+        return true;
+    }
 
     uint32_t current_pc = cpu->pc;
     uint32_t instruction = cpu_read32(cpu, current_pc);

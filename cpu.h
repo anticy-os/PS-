@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "gpu.h"
 #include "dma.h"
+#include "irq.h"
 
 #define RAM_SIZE 0x200000 // 2MB
 #define BIOS_SIZE (512 * 1024)
@@ -39,6 +40,7 @@ typedef struct CPU{
 
     GPU gpu;
     DMAController dma;
+    IRQController irq;
 } CPU;
 
 extern bool trace_enabled;
