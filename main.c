@@ -31,6 +31,7 @@ int main(int argc, char *argv[]) {
     cpu->cop0[12] = 0x00400000;
     cpu->cop0[15] = 0x00000002;
     gpu_init(&cpu->gpu);
+    dma_init(&cpu->dma);
 
     if (load_binary(filename, cpu, 0x1FC00000) == 0) {
         free(cpu);

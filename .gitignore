@@ -4,3 +4,4 @@
 ps1emu
 *.o
 ps1emu.dSYM/
+*.log

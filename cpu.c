@@ -36,6 +36,10 @@ uint32_t mem_read32(CPU *cpu, uint32_t addr) {
     uint32_t paddr = ps1_translate_address(addr);
     if (paddr == 0x1F801810) return gpu_read_data(&cpu->gpu);
     if (paddr == 0x1F801814) return gpu_read_status(&cpu->gpu);
+
+    uint32_t dma_val;
+    if (dma_mem_read32(cpu, paddr, &dma_val)) return dma_val;
+
     return (uint32_t)mem_read8(cpu, addr) |
            ((uint32_t)mem_read8(cpu, addr + 1) << 8) |
            ((uint32_t)mem_read8(cpu, addr + 2) << 16) |
@@ -63,6 +67,9 @@ void mem_write32(CPU *cpu, uint32_t addr, uint32_t val) {
     uint32_t paddr = ps1_translate_address(addr);
     if (paddr == 0x1F801810) { gpu_write_gp0(&cpu->gpu, val); return; }
     if (paddr == 0x1F801814) { gpu_write_gp1(&cpu->gpu, val); return; }
+
+    if (dma_mem_write32(cpu, paddr, val)) return; 
+
     mem_write8(cpu, addr, (uint8_t)val);
     mem_write8(cpu, addr + 1, (uint8_t)(val >> 8));
     mem_write8(cpu, addr + 2, (uint8_t)(val >> 16));

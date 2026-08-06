@@ -135,6 +135,7 @@ void gpu_write_gp0(GPU *gpu, uint32_t value) {
 
 void gpu_write_gp1(GPU *gpu, uint32_t value) {
     uint8_t cmd = (value >> 24) & 0xFF;
+    printf("[GP1] cmd=0x%02X word=0x%08X\n", cmd, value);
     switch (cmd) {
         case 0x00: // RESET
             gpu_init(gpu);
@@ -145,6 +146,10 @@ void gpu_write_gp1(GPU *gpu, uint32_t value) {
             if (trace_enabled) {
                 printf("  [GPU] Display %s\n", gpu->display_enabled ? "enabled" : "disabled");
             }
+            break;
+        case 0x04: // DMA DIRECTION
+            gpu->gpustat = (gpu->gpustat & ~(3u << 29)) | ((value & 3u) << 29);
+            if (trace_enabled) printf(" [GPU] DMA direction = %u\n", value & 3);
             break;
         case 0x05: // DISPLAY VRAM START
             gpu->display_x = value & 0x3FF;
@@ -170,7 +175,11 @@ void gpu_write_gp1(GPU *gpu, uint32_t value) {
 }
 
 uint32_t gpu_read_status(GPU *gpu) {
-    return gpu->gpustat | 0x1C000000;
+    uint32_t status = gpu->gpustat | 0x1C000000;
+    status |= (1u << 26); // ready to receive GP0
+    status |= (1u << 27); // ready to send VRAM to CPU
+    status |= (1u << 28); // ready to receive DMA
+    return status;
 }
 
 uint32_t gpu_read_data(GPU *gpu) {

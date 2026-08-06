@@ -38,6 +38,8 @@ static uint32_t bgr555_to_argb8888(uint16_t pixel) {
 static bool resize_output(Video *video, int width, int height) {
     if (video->texture && video->width == width && video->height == height) return true;
 
+    printf("[RESIZE] %dx%d -> %dx%d\n", video->width, video->height, width, height);
+
     SDL_DestroyTexture(video->texture);
     video->texture = SDL_CreateTexture(video->renderer, SDL_PIXELFORMAT_ARGB8888,
                                        SDL_TEXTUREACCESS_STREAMING, width, height);

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "gpu.h"
+#include "dma.h"
 
 #define RAM_SIZE 0x200000 // 2MB
 #define BIOS_SIZE (512 * 1024)
@@ -22,7 +23,7 @@
 #define EXC_RI       10
 #define EXC_OV       12
 
-typedef struct {
+typedef struct CPU{
     uint32_t pc;
     uint32_t next_pc;
     uint32_t regs[32];
@@ -37,6 +38,7 @@ typedef struct {
     bool next_in_delay_slot;
 
     GPU gpu;
+    DMAController dma;
 } CPU;
 
 extern bool trace_enabled;
